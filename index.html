@@ -160,6 +160,51 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
 .zoom-slider { -webkit-appearance: none; width: 100px; height: 4px; background: var(--border); border-radius: 2px; outline: none; }
 .zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--accent); border-radius: 50%; cursor: pointer; }
 </style>
+<script>
+// BSI Theme Bridge v1.1 — iframe: parent-only control / standalone: local toggle
+(function() {
+  var APP_THEME_KEY = 'mindforge_theme';
+  var isEmbedded = (window.parent !== window);
+  function applyBsiTheme(theme) {
+    if (theme !== 'dark' && theme !== 'light') theme = 'dark';
+    var html = document.documentElement;
+    html.setAttribute('data-theme', theme);
+    html.style.colorScheme = theme;
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = (theme === 'light') ? '#ffffff' : '#09090b';
+    document.dispatchEvent(new CustomEvent('bsi-theme-applied', { detail: { theme: theme } }));
+  }
+  function mapTheme(raw) {
+    return (raw === 'asml' || raw === 'light') ? 'light' : 'dark';
+  }
+  if (isEmbedded) {
+    var s = document.createElement('style');
+    s.textContent = '[data-theme-toggle]{display:none!important}';
+    (document.head || document.documentElement).appendChild(s);
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'theme-change') applyBsiTheme(mapTheme(e.data.theme));
+    });
+    applyBsiTheme('dark');
+    try { window.parent.postMessage({ type: 'theme-request' }, '*'); } catch(e) {}
+  } else {
+    var saved = localStorage.getItem(APP_THEME_KEY) || 'dark';
+    if (saved === 'asml') { saved = 'light'; localStorage.setItem(APP_THEME_KEY, saved); }
+    applyBsiTheme(saved);
+    window.bsiToggleTheme = function() {
+      var next = (document.documentElement.getAttribute('data-theme') || 'dark') === 'dark' ? 'light' : 'dark';
+      applyBsiTheme(next);
+      localStorage.setItem(APP_THEME_KEY, next);
+    };
+    window.bsiSetTheme = function(theme) {
+      var mapped = mapTheme(theme);
+      applyBsiTheme(mapped);
+      localStorage.setItem(APP_THEME_KEY, mapped);
+    };
+  }
+  window._bsiIsEmbedded = isEmbedded;
+  window._bsiApplyTheme = applyBsiTheme;
+})();
+</script>
 </head>
 <body class="bg-zinc-950 text-zinc-100 font-sans text-sm min-h-screen">
 <!-- ══════════════════════════════════════════════
@@ -251,7 +296,7 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Node
       </button>
-      <button onclick="toggleTheme()" class="text-zinc-400 hover:text-amber-400 p-1.5 rounded-lg hover:bg-zinc-800 smooth-transition" title="Toggle theme">
+      <button data-theme-toggle onclick="toggleTheme()" class="text-zinc-400 hover:text-amber-400 p-1.5 rounded-lg hover:bg-zinc-800 smooth-transition" title="Toggle theme">
         <svg id="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       </button>
       <div id="user-info" class="flex items-center gap-1.5 ml-1 pl-2 border-l border-zinc-700">
@@ -368,7 +413,7 @@ if (DEMO_MODE) localStorage.setItem('mindforge_demo', 'true');
 const state = {
   maps: [],
   activeMapId: null,
-  theme: localStorage.getItem('mindforge_theme') || 'dark',
+  theme: document.documentElement.getAttribute('data-theme') || 'dark',
   zoom: 1,
   panX: 0,
   panY: 0,
@@ -404,18 +449,16 @@ function loadAll() {
 }
 
 // ==================== THEME ====================
-function applyTheme(t) {
-  state.theme = t;
-  document.documentElement.setAttribute('data-theme', t);
-  document.documentElement.style.colorScheme = t;
-  localStorage.setItem('mindforge_theme', t);
-  const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.content = t === 'light' ? '#eff2f4' : '#f59e0b';
-  document.getElementById('theme-icon').innerHTML = t === 'dark'
+function updateThemeIcon(t) {
+  const el = document.getElementById('theme-icon');
+  if (el) el.innerHTML = t === 'dark'
     ? '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
     : '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
 }
-function toggleTheme() { applyTheme(state.theme === 'dark' ? 'light' : 'dark'); }
+document.addEventListener('bsi-theme-applied', e => {
+  if (e.detail && e.detail.theme) { state.theme = e.detail.theme; updateThemeIcon(e.detail.theme); if (typeof renderCanvas === 'function') renderCanvas(); }
+});
+function toggleTheme() { if (window.bsiToggleTheme) window.bsiToggleTheme(); }
 
 // ==================== DEMO MODE ====================
 function exitDemo() {
@@ -1351,12 +1394,12 @@ window.addEventListener('message', e => {
       <span class="font-mono text-[10px] text-zinc-400">${u.displayName || u.email}</span>
     `;
   }
-  if (e.data?.type === 'theme-change' && e.data.theme) applyTheme(e.data.theme);
+  // Theme sync handled by BSI Theme Bridge v1.1 in <head>
 });
 
 // ==================== INIT ====================
 function init() {
-  applyTheme(state.theme);
+  updateThemeIcon(state.theme);
   if (DEMO_MODE) document.getElementById('demo-banner').classList.remove('hidden');
   // Adjust for demo banner
   if (DEMO_MODE) {
