@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" style="color-scheme: dark;">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#f59e0b">
+<title>MindForge — Visual Engineering Intelligence</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+/* ══════════════════════════════════════════════
+   THEME SYSTEM — matches BSI portal apps
+   ══════════════════════════════════════════════ */
+:root, [data-theme="dark"] {
+  --bg-body:       #09090b;
+  --bg-primary:    #18181b;
+  --bg-secondary:  #27272a;
+  --bg-hover:      #3f3f46;
+  --text-primary:  #f4f4f5;
+  --text-secondary:#d4d4d8;
+  --text-muted:    #71717a;
+  --text-dim:      #52525b;
+  --accent:        #f59e0b;
+  --accent-hover:  #fbbf24;
+  --accent-bg:     rgba(245,158,11,0.10);
+  --accent-bg-hover:rgba(245,158,11,0.05);
+  --border:        #3f3f46;
+  --border-light:  #27272a;
+  --focus-ring:    #f59e0b;
+  --canvas-bg:     #0a0a0c;
+  --canvas-grid:   rgba(63,63,70,0.4);
+  --node-shadow:   rgba(0,0,0,0.5);
+  --overlay:       rgba(0,0,0,0.7);
+}
+[data-theme="light"] {
+  --bg-body:       #eff2f4;
+  --bg-primary:    #ffffff;
+  --bg-secondary:  #f5f6f8;
+  --bg-hover:      #e8ebef;
+  --text-primary:  #081249;
+  --text-secondary:#2b2a3e;
+  --text-muted:    #6b6b80;
+  --text-dim:      #9a9ab0;
+  --accent:        #10069f;
+  --accent-hover:  #1297e4;
+  --accent-bg:     rgba(16,6,159,0.07);
+  --accent-bg-hover:rgba(16,6,159,0.04);
+  --border:        #cfd3e8;
+  --border-light:  #e2e5f0;
+  --focus-ring:    #1297e4;
+  --canvas-bg:     #f8f9fb;
+  --canvas-grid:   rgba(16,6,159,0.08);
+  --node-shadow:   rgba(8,18,73,0.12);
+  --overlay:       rgba(8,18,73,0.4);
+}
+/* Node type colors */
+:root {
+  --color-function:    #3b82f6;
+  --color-requirement: #f59e0b;
+  --color-failure:     #ef4444;
+  --color-component:   #22c55e;
+  --color-test:        #8b5cf6;
+  --color-generic:     #71717a;
+}
+/* ── Light theme Tailwind overrides ── */
+[data-theme="light"] .bg-zinc-950  { background-color: var(--bg-body) !important; }
+[data-theme="light"] .bg-zinc-900  { background-color: var(--bg-primary) !important; }
+[data-theme="light"] .bg-zinc-900\/80 { background-color: rgba(255,255,255,0.85) !important; }
+[data-theme="light"] .bg-zinc-800  { background-color: var(--bg-secondary) !important; }
+[data-theme="light"] .bg-zinc-700  { background-color: var(--bg-hover) !important; }
+[data-theme="light"] .text-zinc-100 { color: var(--text-primary) !important; }
+[data-theme="light"] .text-zinc-200 { color: var(--text-primary) !important; }
+[data-theme="light"] .text-zinc-300 { color: var(--text-secondary) !important; }
+[data-theme="light"] .text-zinc-400 { color: var(--text-muted) !important; }
+[data-theme="light"] .text-zinc-500 { color: var(--text-muted) !important; }
+[data-theme="light"] .text-zinc-600 { color: var(--text-dim) !important; }
+[data-theme="light"] .text-amber-400 { color: var(--accent) !important; }
+[data-theme="light"] .text-amber-500 { color: var(--accent) !important; }
+[data-theme="light"] .border-zinc-700 { border-color: var(--border) !important; }
+[data-theme="light"] .border-zinc-800 { border-color: var(--border-light) !important; }
+[data-theme="light"] .border-amber-500 { border-color: var(--accent) !important; }
+[data-theme="light"] .hover\:text-amber-400:hover { color: var(--accent-hover) !important; }
+[data-theme="light"] .hover\:bg-zinc-800:hover { background-color: var(--bg-hover) !important; }
+[data-theme="light"] .bg-amber-500 { background-color: var(--accent) !important; }
+[data-theme="light"] .bg-amber-500\/10 { background-color: var(--accent-bg) !important; }
+[data-theme="light"] .ring-amber-500 { --tw-ring-color: var(--focus-ring) !important; }
+
+/* ── Global styles ── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Inter', sans-serif; overflow: hidden; }
+.font-mono { font-family: 'JetBrains Mono', monospace; }
+.smooth-transition { transition: all 0.2s ease; }
+
+/* ── Canvas ── */
+#canvas-container { background: var(--canvas-bg); cursor: grab; user-select: none; }
+#canvas-container.panning { cursor: grabbing; }
+#canvas-container.connecting { cursor: crosshair; }
+.canvas-grid-dot { fill: var(--canvas-grid); }
+
+/* ── Nodes ── */
+.mind-node { cursor: pointer; }
+.mind-node:hover .node-bg { filter: brightness(1.15); }
+.mind-node.selected .node-bg { stroke: var(--accent); stroke-width: 2.5; }
+.mind-node .connector { opacity: 0; transition: opacity 0.15s; cursor: crosshair; }
+.mind-node:hover .connector { opacity: 1; }
+.node-content { font-family: 'Inter', sans-serif; pointer-events: none; }
+.node-title { font-weight: 600; font-size: 13px; line-height: 1.3; }
+.node-meta { font-size: 10px; opacity: 0.7; margin-top: 2px; }
+.node-badge { pointer-events: auto; cursor: pointer; }
+
+/* ── Connections ── */
+.connection-path { fill: none; stroke-width: 2; transition: stroke 0.15s; }
+.connection-path:hover { stroke-width: 3; }
+.connection-label { font-family: 'Inter', sans-serif; font-size: 10px; fill: var(--text-muted); pointer-events: none; }
+[data-theme="light"] .connection-label { fill: var(--text-muted); }
+
+/* ── Groups ── */
+.group-box { rx: 10; ry: 10; }
+.group-label { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
+
+/* ── Minimap ── */
+#minimap { width: 200px; height: 140px; background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+#minimap-svg { width: 100%; height: 100%; }
+.minimap-viewport { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: 0.7; }
+.minimap-node { opacity: 0.6; }
+
+/* ── Context Menu ── */
+#context-menu { z-index: 100; min-width: 180px; }
+.ctx-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; cursor: pointer; font-size: 12px; font-family: 'Inter', sans-serif; color: var(--text-secondary); transition: background 0.1s; }
+.ctx-item:hover { background: var(--accent-bg); color: var(--accent); }
+.ctx-item.danger:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
+.ctx-separator { height: 1px; background: var(--border); margin: 4px 0; }
+.ctx-submenu { position: relative; }
+.ctx-submenu-items { display: none; position: absolute; left: 100%; top: -4px; min-width: 160px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 4px 0; box-shadow: 0 8px 24px var(--node-shadow); }
+.ctx-submenu:hover .ctx-submenu-items { display: block; }
+
+/* ── Modal ── */
+.modal-overlay { position: fixed; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; z-index: 200; }
+.modal-box { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 12px; padding: 24px; max-width: 480px; width: 90%; max-height: 90vh; overflow-y: auto; box-shadow: 0 16px 48px var(--node-shadow); }
+.modal-box h3 { font-family: 'JetBrains Mono', monospace; font-size: 16px; font-weight: 700; color: var(--accent); margin-bottom: 16px; }
+.modal-input { width: 100%; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-size: 13px; font-family: 'Inter', sans-serif; outline: none; }
+.modal-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-bg); }
+.modal-select { width: 100%; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-size: 13px; outline: none; -webkit-appearance: none; }
+.modal-label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; font-family: 'JetBrains Mono', monospace; }
+.btn-primary { background: var(--accent); color: #fff; padding: 8px 20px; border-radius: 6px; border: none; font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'Inter', sans-serif; }
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-ghost { background: transparent; color: var(--text-muted); padding: 8px 20px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; cursor: pointer; font-family: 'Inter', sans-serif; }
+.btn-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* ── Toast ── */
+#toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 300; display: flex; flex-direction: column; gap: 8px; }
+.toast { background: var(--bg-primary); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; font-size: 13px; color: var(--text-secondary); box-shadow: 0 4px 16px var(--node-shadow); animation: toastIn 0.3s ease; min-width: 200px; display: flex; align-items: center; gap: 8px; }
+.toast.success { border-left: 3px solid #22c55e; }
+.toast.error { border-left: 3px solid #ef4444; }
+.toast.info { border-left: 3px solid var(--accent); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Zoom controls ── */
+.zoom-slider { -webkit-appearance: none; width: 100px; height: 4px; background: var(--border); border-radius: 2px; outline: none; }
+.zoom-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--accent); border-radius: 50%; cursor: pointer; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 font-sans text-sm min-h-screen">
+<!-- ══════════════════════════════════════════════
+     DEMO MODE BANNER
+     ══════════════════════════════════════════════ -->
+<div id="demo-banner" class="hidden fixed top-0 inset-x-0 z-50 bg-blue-600/90 border-b border-blue-500 px-4 py-2 flex items-center justify-between" style="backdrop-filter:blur(8px)">
+  <div class="flex items-center gap-2 text-white font-mono text-xs">
+    <span>⚡</span>
+    <span class="font-bold">Demo Mode</span>
+    <span class="text-blue-200 ml-1">Data is stored locally in your browser</span>
+  </div>
+  <div class="flex gap-2">
+    <button onclick="exitDemo()" class="px-3 py-1 bg-white text-blue-600 font-mono text-xs rounded hover:bg-blue-50 font-bold">Exit Demo</button>
+    <button onclick="resetDemo()" class="px-3 py-1 bg-blue-500 hover:bg-blue-400 text-white font-mono text-xs rounded font-bold">Reset Data</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     SIDEBAR
+     ══════════════════════════════════════════════ -->
+<aside id="sidebar" class="fixed inset-y-0 left-0 z-40 w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col transition-transform">
+  <!-- Logo -->
+  <div class="p-4 border-b border-zinc-800">
+    <div class="flex items-center justify-between mb-1">
+      <div class="flex gap-1.5">
+        <div class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
+        <div class="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
+        <div class="w-2.5 h-2.5 rounded-full bg-green-500"></div>
+      </div>
+      <button onclick="toggleSidebar()" class="text-zinc-500 hover:text-amber-400 smooth-transition"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/></svg></button>
+    </div>
+    <h1 class="font-mono font-bold text-amber-500 text-base mt-2">MindForge</h1>
+    <p class="text-[10px] text-zinc-500 font-mono">Visual Engineering Intelligence</p>
+  </div>
+  <!-- Maps list -->
+  <div class="flex-1 overflow-y-auto p-3">
+    <div class="text-[10px] text-zinc-500 font-mono uppercase tracking-wider mb-2">Mind Maps</div>
+    <div id="map-list"></div>
+    <button onclick="showNewMapModal()" class="w-full mt-2 flex items-center gap-2 px-3 py-2 rounded-lg text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 smooth-transition font-mono text-xs">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Map
+    </button>
+  </div>
+  <!-- Footer -->
+  <div class="p-3 border-t border-zinc-800 flex gap-2">
+    <button onclick="exportMap()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Export JSON">Export</button>
+    <button onclick="importMap()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Import JSON">Import</button>
+  </div>
+</aside>
+
+<!-- Sidebar expand button (when collapsed) -->
+<button id="sidebar-expand" class="hidden fixed top-3 left-2 z-40 text-zinc-500 hover:text-amber-400 bg-zinc-900 border border-zinc-800 rounded-lg p-1.5 smooth-transition" onclick="toggleSidebar()">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 17l5-5-5-5M6 17l5-5-5-5"/></svg>
+</button>
+
+<!-- ══════════════════════════════════════════════
+     MAIN CONTENT
+     ══════════════════════════════════════════════ -->
+<div id="main" class="ml-56 transition-all h-screen flex flex-col">
+  <!-- Header -->
+  <header class="sticky top-0 z-30 bg-zinc-900/80 border-b border-zinc-800 px-4 py-2 flex items-center justify-between" style="backdrop-filter:blur(8px)">
+    <!-- Left: Map name -->
+    <div class="flex items-center gap-3">
+      <h2 id="header-map-name" class="font-mono font-bold text-zinc-100 text-sm truncate max-w-[200px]">—</h2>
+    </div>
+    <!-- Center: Layout + Zoom -->
+    <div class="flex items-center gap-3">
+      <!-- Layout buttons -->
+      <div class="flex bg-zinc-800 rounded-lg p-0.5 border border-zinc-700">
+        <button onclick="applyLayout('tree')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="tree" title="Tree Layout">Tree</button>
+        <button onclick="applyLayout('radial')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="radial" title="Radial Layout">Radial</button>
+        <button onclick="applyLayout('force')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="force" title="Force-Directed">Force</button>
+      </div>
+      <!-- Zoom -->
+      <div class="flex items-center gap-2">
+        <button onclick="zoomOut()" class="text-zinc-400 hover:text-amber-400 smooth-transition"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>
+        <input type="range" id="zoom-slider" class="zoom-slider" min="20" max="300" value="100" oninput="setZoom(this.value/100)">
+        <button onclick="zoomIn()" class="text-zinc-400 hover:text-amber-400 smooth-transition"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>
+        <span id="zoom-label" class="text-[10px] font-mono text-zinc-500 w-10 text-center">100%</span>
+      </div>
+      <!-- Fit -->
+      <button onclick="fitToScreen()" class="text-zinc-400 hover:text-amber-400 smooth-transition p-1 rounded hover:bg-zinc-800" title="Fit to screen">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      </button>
+    </div>
+    <!-- Right: Add node, theme, user -->
+    <div class="flex items-center gap-2">
+      <button onclick="addNodeAtCenter()" class="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500/10 text-amber-400 rounded-lg text-[11px] font-mono hover:bg-amber-500/20 smooth-transition">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Node
+      </button>
+      <button onclick="toggleTheme()" class="text-zinc-400 hover:text-amber-400 p-1.5 rounded-lg hover:bg-zinc-800 smooth-transition" title="Toggle theme">
+        <svg id="theme-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+      <div id="user-info" class="flex items-center gap-1.5 ml-1 pl-2 border-l border-zinc-700">
+        <div class="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-[10px] font-bold text-black">D</div>
+        <span class="font-mono text-[10px] text-zinc-400">Demo User</span>
+        <span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500 border border-zinc-700">OFFLINE</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Canvas -->
+  <main id="canvas-container" class="flex-1 overflow-hidden relative">
+    <svg id="canvas-svg" width="100%" height="100%">
+      <defs>
+        <marker id="arrow-default" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+          <polygon points="0 0,10 3,0 6" fill="#71717a"/>
+        </marker>
+        <marker id="arrow-accent" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+          <polygon points="0 0,10 3,0 6" fill="var(--accent)"/>
+        </marker>
+        <marker id="arrow-red" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+          <polygon points="0 0,10 3,0 6" fill="#ef4444"/>
+        </marker>
+        <marker id="arrow-green" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+          <polygon points="0 0,10 3,0 6" fill="#22c55e"/>
+        </marker>
+        <marker id="arrow-purple" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+          <polygon points="0 0,10 3,0 6" fill="#8b5cf6"/>
+        </marker>
+        <pattern id="grid-pattern" width="50" height="50" patternUnits="userSpaceOnUse">
+          <circle cx="25" cy="25" r="1" class="canvas-grid-dot"/>
+        </pattern>
+      </defs>
+      <rect id="grid-bg" width="20000" height="20000" x="-10000" y="-10000" fill="url(#grid-pattern)"/>
+      <g id="groups-layer"></g>
+      <g id="connections-layer"></g>
+      <g id="nodes-layer"></g>
+      <g id="drag-connection-layer"></g>
+    </svg>
+    <!-- Minimap -->
+    <div id="minimap" class="absolute bottom-4 right-4 shadow-lg">
+      <svg id="minimap-svg" viewBox="0 0 200 140"></svg>
+    </div>
+  </main>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     CONTEXT MENU
+     ══════════════════════════════════════════════ -->
+<div id="context-menu" class="hidden fixed bg-zinc-800 border border-zinc-700 rounded-lg py-1 shadow-xl" style="min-width:180px">
+  <div class="ctx-item" onclick="editSelectedNode()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit</div>
+  <div class="ctx-submenu">
+    <div class="ctx-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg> Change Type <span class="ml-auto text-[10px]">▸</span></div>
+    <div class="ctx-submenu-items">
+      <div class="ctx-item" onclick="changeNodeType('Function')"><span style="color:#3b82f6">●</span> Function</div>
+      <div class="ctx-item" onclick="changeNodeType('Requirement')"><span style="color:#f59e0b">●</span> Requirement</div>
+      <div class="ctx-item" onclick="changeNodeType('FailureMode')"><span style="color:#ef4444">●</span> Failure Mode</div>
+      <div class="ctx-item" onclick="changeNodeType('Component')"><span style="color:#22c55e">●</span> Component</div>
+      <div class="ctx-item" onclick="changeNodeType('TestCase')"><span style="color:#8b5cf6">●</span> Test Case</div>
+      <div class="ctx-item" onclick="changeNodeType('Generic')"><span style="color:#71717a">●</span> Generic</div>
+    </div>
+  </div>
+  <div class="ctx-separator"></div>
+  <div class="ctx-submenu">
+    <div class="ctx-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> Push to App <span class="ml-auto text-[10px]">▸</span></div>
+    <div class="ctx-submenu-items">
+      <div class="ctx-item" onclick="pushToApp('scrum')"><span style="color:#3b82f6">●</span> Push to Scrum</div>
+      <div class="ctx-item" onclick="pushToApp('reqforge')"><span style="color:#f59e0b">●</span> Push to ReqForge</div>
+      <div class="ctx-item" onclick="pushToApp('alm')"><span style="color:#22c55e">●</span> Push to ALM</div>
+    </div>
+  </div>
+  <div class="ctx-separator"></div>
+  <div class="ctx-item danger" onclick="deleteSelectedNode()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg> Delete</div>
+</div>
+
+<!-- ══════════════════════════════════════════════
+     MODAL
+     ══════════════════════════════════════════════ -->
+<div id="modal" class="hidden"></div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- Hidden file input for import -->
+<input type="file" id="import-input" accept=".json" style="display:none" onchange="handleImport(event)">
+
+<!-- ══════════════════════════════════════════════
+     JAVASCRIPT
+     ══════════════════════════════════════════════ -->
+<script>
+// ==================== CONSTANTS ====================
+const NODE_TYPES = {
+  Function:    { color: '#3b82f6', icon: 'zap',            label: 'Function' },
+  Requirement: { color: '#f59e0b', icon: 'file-text',      label: 'Requirement' },
+  FailureMode: { color: '#ef4444', icon: 'alert-triangle', label: 'Failure Mode' },
+  Component:   { color: '#22c55e', icon: 'box',            label: 'Component' },
+  TestCase:    { color: '#8b5cf6', icon: 'check-circle',   label: 'Test Case' },
+  Generic:     { color: '#71717a', icon: 'circle',         label: 'Generic' }
+};
+const CONN_TYPES = ['decomposes into', 'causes', 'verified by', 'mitigates'];
+const CONN_ARROWS = { 'decomposes into': '#arrow-default', 'causes': '#arrow-red', 'verified by': '#arrow-purple', 'mitigates': '#arrow-green' };
+const CONN_COLORS = { 'decomposes into': '#71717a', 'causes': '#ef4444', 'verified by': '#8b5cf6', 'mitigates': '#22c55e' };
+const DEFAULT_NODE_W = 200;
+const DEFAULT_NODE_H = 72;
+const DB_PREFIX = 'demo_db_mindforge_';
+const PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
+const STATUSES = ['Active', 'Completed', 'Blocked', 'On Hold'];
+
+// ==================== STATE ====================
+const params = new URLSearchParams(location.search);
+const DEMO_MODE = params.get('demo') === 'true' || localStorage.getItem('mindforge_demo') === 'true';
+if (DEMO_MODE) localStorage.setItem('mindforge_demo', 'true');
+
+const state = {
+  maps: [],
+  activeMapId: null,
+  theme: localStorage.getItem('mindforge_theme') || 'dark',
+  zoom: 1,
+  panX: 0,
+  panY: 0,
+  selectedNodeId: null,
+  draggingNodeId: null,
+  dragStartX: 0, dragStartY: 0,
+  nodeDragStartX: 0, nodeDragStartY: 0,
+  isPanning: false,
+  panStartX: 0, panStartY: 0,
+  panStartPanX: 0, panStartPanY: 0,
+  connectingFrom: null,
+  connectingMouse: null,
+  spaceDown: false,
+  sidebarOpen: true
+};
+
+// ==================== HELPERS ====================
+function uid() { return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6); }
+function getMap() { return state.maps.find(m => m.id === state.activeMapId) || null; }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// ==================== PERSISTENCE ====================
+function saveAll() {
+  localStorage.setItem(DB_PREFIX + 'maps', JSON.stringify(state.maps));
+  localStorage.setItem(DB_PREFIX + 'active', state.activeMapId || '');
+}
+function loadAll() {
+  const raw = localStorage.getItem(DB_PREFIX + 'maps');
+  if (raw) {
+    try { state.maps = JSON.parse(raw); } catch(e) { state.maps = []; }
+  }
+  state.activeMapId = localStorage.getItem(DB_PREFIX + 'active') || (state.maps[0]?.id || null);
+}
+
+// ==================== THEME ====================
+function applyTheme(t) {
+  state.theme = t;
+  document.documentElement.setAttribute('data-theme', t);
+  document.documentElement.style.colorScheme = t;
+  localStorage.setItem('mindforge_theme', t);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = t === 'light' ? '#eff2f4' : '#f59e0b';
+  document.getElementById('theme-icon').innerHTML = t === 'dark'
+    ? '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
+    : '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>';
+}
+function toggleTheme() { applyTheme(state.theme === 'dark' ? 'light' : 'dark'); }
+
+// ==================== DEMO MODE ====================
+function exitDemo() {
+  localStorage.removeItem('mindforge_demo');
+  Object.keys(localStorage).forEach(k => { if (k.startsWith(DB_PREFIX)) localStorage.removeItem(k); });
+  location.href = location.pathname;
+}
+function resetDemo() {
+  Object.keys(localStorage).forEach(k => { if (k.startsWith(DB_PREFIX)) localStorage.removeItem(k); });
+  location.reload();
+}
+
+// ==================== TOAST ====================
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(10px)'; setTimeout(() => el.remove(), 300); }, 3000);
+}
+
+// ==================== CANVAS COORDINATE TRANSFORMS ====================
+function screenToCanvas(sx, sy) {
+  const svg = document.getElementById('canvas-svg');
+  const rect = svg.getBoundingClientRect();
+  return {
+    x: (sx - rect.left) / state.zoom + state.panX,
+    y: (sy - rect.top) / state.zoom + state.panY
+  };
+}
+function canvasToScreen(cx, cy) {
+  const svg = document.getElementById('canvas-svg');
+  const rect = svg.getBoundingClientRect();
+  return {
+    x: (cx - state.panX) * state.zoom + rect.left,
+    y: (cy - state.panY) * state.zoom + rect.top
+  };
+}
+
+// ==================== ZOOM & PAN ====================
+function updateViewBox() {
+  const svg = document.getElementById('canvas-svg');
+  const rect = svg.getBoundingClientRect();
+  const w = rect.width / state.zoom;
+  const h = rect.height / state.zoom;
+  svg.setAttribute('viewBox', `${state.panX} ${state.panY} ${w} ${h}`);
+  document.getElementById('zoom-slider').value = Math.round(state.zoom * 100);
+  document.getElementById('zoom-label').textContent = Math.round(state.zoom * 100) + '%';
+  renderMinimap();
+}
+function setZoom(z, anchorX, anchorY) {
+  const oldZ = state.zoom;
+  state.zoom = clamp(z, 0.15, 3);
+  if (anchorX !== undefined) {
+    state.panX += anchorX * (1/oldZ - 1/state.zoom);
+    state.panY += anchorY * (1/oldZ - 1/state.zoom);
+  }
+  updateViewBox();
+}
+function zoomIn() { setZoom(state.zoom * 1.2); }
+function zoomOut() { setZoom(state.zoom / 1.2); }
+function fitToScreen() {
+  const map = getMap();
+  if (!map || !map.nodes.length) return;
+  const svg = document.getElementById('canvas-svg');
+  const rect = svg.getBoundingClientRect();
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  map.nodes.forEach(n => {
+    minX = Math.min(minX, n.position.x);
+    minY = Math.min(minY, n.position.y);
+    maxX = Math.max(maxX, n.position.x + (n.size?.w || DEFAULT_NODE_W));
+    maxY = Math.max(maxY, n.position.y + (n.size?.h || DEFAULT_NODE_H));
+  });
+  const pad = 80;
+  const contentW = maxX - minX + pad * 2;
+  const contentH = maxY - minY + pad * 2;
+  state.zoom = clamp(Math.min(rect.width / contentW, rect.height / contentH), 0.15, 2);
+  state.panX = minX - pad;
+  state.panY = minY - pad;
+  updateViewBox();
+}
+
+// ==================== NODE RENDERING ====================
+function getNodeColor(node) {
+  return node.color || NODE_TYPES[node.type]?.color || '#71717a';
+}
+function renderNodeSVG(node) {
+  const w = node.size?.w || DEFAULT_NODE_W;
+  const h = node.size?.h || DEFAULT_NODE_H;
+  const color = getNodeColor(node);
+  const typeInfo = NODE_TYPES[node.type] || NODE_TYPES.Generic;
+  const isSelected = state.selectedNodeId === node.id;
+  const isLinked = !!node.linkedApp;
+  const priorityColor = node.priority === 'Critical' ? '#ef4444' : node.priority === 'High' ? '#f59e0b' : node.priority === 'Medium' ? '#3b82f6' : '#71717a';
+
+  let html = `<g class="mind-node ${isSelected ? 'selected' : ''}" data-node-id="${node.id}" transform="translate(${node.position.x},${node.position.y})">`;
+  // Shadow
+  html += `<rect x="2" y="2" width="${w}" height="${h}" rx="8" fill="black" opacity="0.15"/>`;
+  // Background
+  html += `<rect class="node-bg" x="0" y="0" width="${w}" height="${h}" rx="8" fill="${color}" opacity="0.12" stroke="${isSelected ? 'var(--accent)' : color}" stroke-width="${isSelected ? 2.5 : 1.5}"/>`;
+  // Left color bar
+  html += `<rect x="0" y="0" width="4" height="${h}" rx="2" fill="${color}"/>`;
+  // Content
+  html += `<foreignObject x="0" y="0" width="${w}" height="${h}">
+    <div xmlns="http://www.w3.org/1999/xhtml" class="node-content" style="padding:8px 10px 8px 14px;height:100%;display:flex;flex-direction:column;justify-content:center;">
+      <div style="display:flex;align-items:center;gap:5px;">
+        <span style="color:${color};font-size:10px;opacity:0.8;">${typeInfo.label}</span>
+        ${node.priority ? `<span style="width:6px;height:6px;border-radius:50%;background:${priorityColor};display:inline-block;"></span>` : ''}
+      </div>
+      <div class="node-title" style="color:var(--text-primary);margin-top:2px;">${escHtml(node.title)}</div>
+      ${node.owner ? `<div class="node-meta" style="color:var(--text-muted);">${escHtml(node.owner)}</div>` : ''}
+    </div>
+  </foreignObject>`;
+  // Connectors
+  const cx = w / 2, cy = h / 2;
+  html += `<circle class="connector" cx="${cx}" cy="0" r="5" fill="var(--accent)" data-pos="top"/>`;
+  html += `<circle class="connector" cx="${w}" cy="${cy}" r="5" fill="var(--accent)" data-pos="right"/>`;
+  html += `<circle class="connector" cx="${cx}" cy="${h}" r="5" fill="var(--accent)" data-pos="bottom"/>`;
+  html += `<circle class="connector" cx="0" cy="${cy}" r="5" fill="var(--accent)" data-pos="left"/>`;
+  // Linked badge
+  if (isLinked) {
+    const appColor = node.linkedApp === 'scrum' ? '#3b82f6' : node.linkedApp === 'reqforge' ? '#f59e0b' : '#22c55e';
+    html += `<circle class="node-badge" cx="${w - 2}" cy="2" r="8" fill="${appColor}" stroke="var(--bg-primary)" stroke-width="2"/>`;
+    html += `<text x="${w - 2}" y="5" text-anchor="middle" font-size="8" fill="white" font-weight="bold" style="pointer-events:none;">↗</text>`;
+  }
+  html += '</g>';
+  return html;
+}
+function escHtml(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// ==================== CONNECTION RENDERING ====================
+function getConnectorPos(node, pos) {
+  const w = node.size?.w || DEFAULT_NODE_W;
+  const h = node.size?.h || DEFAULT_NODE_H;
+  const x = node.position.x, y = node.position.y;
+  switch(pos) {
+    case 'top': return { x: x + w/2, y: y };
+    case 'right': return { x: x + w, y: y + h/2 };
+    case 'bottom': return { x: x + w/2, y: y + h };
+    case 'left': return { x: x, y: y + h/2 };
+    default: return { x: x + w/2, y: y + h/2 };
+  }
+}
+function bestConnectors(from, to) {
+  const fw = from.size?.w || DEFAULT_NODE_W, fh = from.size?.h || DEFAULT_NODE_H;
+  const tw = to.size?.w || DEFAULT_NODE_W, th = to.size?.h || DEFAULT_NODE_H;
+  const fcx = from.position.x + fw/2, fcy = from.position.y + fh/2;
+  const tcx = to.position.x + tw/2, tcy = to.position.y + th/2;
+  const dx = tcx - fcx, dy = tcy - fcy;
+  let fromPos, toPos;
+  if (Math.abs(dx) > Math.abs(dy)) {
+    fromPos = dx > 0 ? 'right' : 'left';
+    toPos = dx > 0 ? 'left' : 'right';
+  } else {
+    fromPos = dy > 0 ? 'bottom' : 'top';
+    toPos = dy > 0 ? 'top' : 'bottom';
+  }
+  return { from: getConnectorPos(from, fromPos), to: getConnectorPos(to, toPos) };
+}
+function renderConnectionSVG(conn, map) {
+  const fromNode = map.nodes.find(n => n.id === conn.fromNodeId);
+  const toNode = map.nodes.find(n => n.id === conn.toNodeId);
+  if (!fromNode || !toNode) return '';
+  const pts = bestConnectors(fromNode, toNode);
+  const dx = pts.to.x - pts.from.x, dy = pts.to.y - pts.from.y;
+  const cx1 = pts.from.x + dx * 0.4, cy1 = pts.from.y;
+  const cx2 = pts.to.x - dx * 0.4, cy2 = pts.to.y;
+  const color = CONN_COLORS[conn.type] || '#71717a';
+  const marker = CONN_ARROWS[conn.type] || '#arrow-default';
+  const mx = (pts.from.x + pts.to.x) / 2, my = (pts.from.y + pts.to.y) / 2 - 8;
+  let html = `<g class="connection-group" data-conn-id="${conn.id}">`;
+  html += `<path class="connection-path" d="M${pts.from.x},${pts.from.y} C${cx1},${cy1} ${cx2},${cy2} ${pts.to.x},${pts.to.y}" stroke="${color}" marker-end="url(${marker})"/>`;
+  html += `<text class="connection-label" x="${mx}" y="${my}" text-anchor="middle">${escHtml(conn.type)}</text>`;
+  html += '</g>';
+  return html;
+}
+
+// ==================== GROUP RENDERING ====================
+function renderGroupSVG(group, map) {
+  // Auto-calculate bounds from member nodes
+  const members = map.nodes.filter(n => group.nodeIds.includes(n.id));
+  if (!members.length) return '';
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  members.forEach(n => {
+    minX = Math.min(minX, n.position.x);
+    minY = Math.min(minY, n.position.y);
+    maxX = Math.max(maxX, n.position.x + (n.size?.w || DEFAULT_NODE_W));
+    maxY = Math.max(maxY, n.position.y + (n.size?.h || DEFAULT_NODE_H));
+  });
+  const pad = 30;
+  const x = minX - pad, y = minY - pad - 18;
+  const w = maxX - minX + pad * 2, h = maxY - minY + pad * 2 + 18;
+  let html = `<g class="group" data-group-id="${group.id}">`;
+  html += `<rect class="group-box" x="${x}" y="${y}" width="${w}" height="${h}" fill="${group.color}" fill-opacity="0.04" stroke="${group.color}" stroke-width="1.5" stroke-dasharray="6,3"/>`;
+  html += `<text class="group-label" x="${x + 8}" y="${y + 14}" fill="${group.color}">${escHtml(group.title)}</text>`;
+  html += '</g>';
+  return html;
+}
+
+// ==================== FULL CANVAS RENDER ====================
+function renderCanvas() {
+  const map = getMap();
+  if (!map) {
+    document.getElementById('groups-layer').innerHTML = '';
+    document.getElementById('connections-layer').innerHTML = '';
+    document.getElementById('nodes-layer').innerHTML = '';
+    return;
+  }
+  document.getElementById('groups-layer').innerHTML = (map.groups || []).map(g => renderGroupSVG(g, map)).join('');
+  document.getElementById('connections-layer').innerHTML = (map.connections || []).map(c => renderConnectionSVG(c, map)).join('');
+  document.getElementById('nodes-layer').innerHTML = (map.nodes || []).map(n => renderNodeSVG(n)).join('');
+  updateViewBox();
+}
+
+// ==================== MINIMAP ====================
+function renderMinimap() {
+  const map = getMap();
+  const mmSvg = document.getElementById('minimap-svg');
+  if (!map || !map.nodes.length) { mmSvg.innerHTML = ''; return; }
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  map.nodes.forEach(n => {
+    minX = Math.min(minX, n.position.x);
+    minY = Math.min(minY, n.position.y);
+    maxX = Math.max(maxX, n.position.x + (n.size?.w || DEFAULT_NODE_W));
+    maxY = Math.max(maxY, n.position.y + (n.size?.h || DEFAULT_NODE_H));
+  });
+  const pad = 40;
+  const cw = maxX - minX + pad * 2 || 1;
+  const ch = maxY - minY + pad * 2 || 1;
+  mmSvg.setAttribute('viewBox', `${minX - pad} ${minY - pad} ${cw} ${ch}`);
+  let html = '';
+  // Connections
+  (map.connections || []).forEach(c => {
+    const from = map.nodes.find(n => n.id === c.fromNodeId);
+    const to = map.nodes.find(n => n.id === c.toNodeId);
+    if (from && to) {
+      const fx = from.position.x + (from.size?.w || DEFAULT_NODE_W)/2;
+      const fy = from.position.y + (from.size?.h || DEFAULT_NODE_H)/2;
+      const tx = to.position.x + (to.size?.w || DEFAULT_NODE_W)/2;
+      const ty = to.position.y + (to.size?.h || DEFAULT_NODE_H)/2;
+      html += `<line x1="${fx}" y1="${fy}" x2="${tx}" y2="${ty}" stroke="#71717a" stroke-width="2" opacity="0.3"/>`;
+    }
+  });
+  // Nodes
+  map.nodes.forEach(n => {
+    const color = getNodeColor(n);
+    html += `<rect class="minimap-node" x="${n.position.x}" y="${n.position.y}" width="${n.size?.w || DEFAULT_NODE_W}" height="${n.size?.h || DEFAULT_NODE_H}" rx="3" fill="${color}" opacity="0.5"/>`;
+  });
+  // Viewport rect
+  const svg = document.getElementById('canvas-svg');
+  const rect = svg.getBoundingClientRect();
+  const vw = rect.width / state.zoom, vh = rect.height / state.zoom;
+  html += `<rect class="minimap-viewport" x="${state.panX}" y="${state.panY}" width="${vw}" height="${vh}" rx="2"/>`;
+  mmSvg.innerHTML = html;
+}
+
+// ==================== SIDEBAR ====================
+function renderSidebar() {
+  const list = document.getElementById('map-list');
+  list.innerHTML = state.maps.map(m => `
+    <div class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer smooth-transition ${m.id === state.activeMapId ? 'bg-amber-500/10 text-amber-400' : 'text-zinc-400 hover:text-amber-400 hover:bg-zinc-800'}" onclick="switchMap('${m.id}')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+      <span class="font-mono text-xs truncate">${escHtml(m.name)}</span>
+    </div>
+  `).join('');
+  document.getElementById('header-map-name').textContent = getMap()?.name || '—';
+}
+
+// ==================== MAP OPERATIONS ====================
+function switchMap(id) {
+  state.activeMapId = id;
+  state.selectedNodeId = null;
+  state.zoom = 1; state.panX = 0; state.panY = 0;
+  saveAll();
+  renderSidebar();
+  renderCanvas();
+  setTimeout(fitToScreen, 100);
+}
+function createMap(name, desc) {
+  const map = { id: uid(), name, description: desc || '', nodes: [], connections: [], groups: [], createdAt: Date.now() };
+  state.maps.push(map);
+  state.activeMapId = map.id;
+  saveAll();
+  renderSidebar();
+  renderCanvas();
+  return map;
+}
+function deleteMap(id) {
+  state.maps = state.maps.filter(m => m.id !== id);
+  if (state.activeMapId === id) state.activeMapId = state.maps[0]?.id || null;
+  saveAll();
+  renderSidebar();
+  renderCanvas();
+}
+
+// ==================== NODE OPERATIONS ====================
+function addNode(type, title, x, y, extra = {}) {
+  const map = getMap();
+  if (!map) return null;
+  const node = { id: uid(), title, type, position: { x, y }, size: { w: DEFAULT_NODE_W, h: DEFAULT_NODE_H }, priority: 'Medium', status: 'Active', owner: '', description: '', linkedApp: null, linkedId: null, ...extra };
+  map.nodes.push(node);
+  saveAll();
+  renderCanvas();
+  return node;
+}
+function addNodeAtCenter() {
+  const svg = document.getElementById('canvas-svg');
+  const rect = svg.getBoundingClientRect();
+  const cx = state.panX + (rect.width / state.zoom) / 2 - DEFAULT_NODE_W / 2;
+  const cy = state.panY + (rect.height / state.zoom) / 2 - DEFAULT_NODE_H / 2;
+  const node = addNode('Generic', 'New Node', cx, cy);
+  if (node) { state.selectedNodeId = node.id; showEditModal(node.id); }
+}
+function deleteSelectedNode() {
+  const map = getMap();
+  if (!map || !state.selectedNodeId) return;
+  map.connections = map.connections.filter(c => c.fromNodeId !== state.selectedNodeId && c.toNodeId !== state.selectedNodeId);
+  map.nodes = map.nodes.filter(n => n.id !== state.selectedNodeId);
+  (map.groups || []).forEach(g => { g.nodeIds = g.nodeIds.filter(id => id !== state.selectedNodeId); });
+  state.selectedNodeId = null;
+  hideContextMenu();
+  saveAll();
+  renderCanvas();
+  toast('Node deleted', 'info');
+}
+function changeNodeType(type) {
+  const map = getMap();
+  if (!map || !state.selectedNodeId) return;
+  const node = map.nodes.find(n => n.id === state.selectedNodeId);
+  if (node) { node.type = type; node.color = NODE_TYPES[type]?.color; saveAll(); renderCanvas(); }
+  hideContextMenu();
+}
+
+// ==================== CONNECTION OPERATIONS ====================
+function addConnection(fromId, toId, type = 'decomposes into') {
+  const map = getMap();
+  if (!map) return;
+  if (fromId === toId) return;
+  if (map.connections.find(c => c.fromNodeId === fromId && c.toNodeId === toId)) return;
+  map.connections.push({ id: uid(), fromNodeId: fromId, toNodeId: toId, type });
+  saveAll();
+  renderCanvas();
+}
+
+// ==================== INTEGRATION (Push to App) ====================
+function pushToApp(app) {
+  const map = getMap();
+  if (!map || !state.selectedNodeId) return;
+  const node = map.nodes.find(n => n.id === state.selectedNodeId);
+  if (!node) return;
+  node.linkedApp = app;
+  node.linkedId = 'demo_' + uid();
+  saveAll();
+  renderCanvas();
+  const appNames = { scrum: 'Scrum', reqforge: 'ReqForge', alm: 'ALM' };
+  toast(`Pushed "${node.title}" to ${appNames[app]}!`, 'success');
+  hideContextMenu();
+}
+
+// ==================== LAYOUT ALGORITHMS ====================
+function applyLayout(type) {
+  const map = getMap();
+  if (!map || !map.nodes.length) return;
+  // Find root (node with most outgoing connections, or first node)
+  const outCount = {};
+  map.nodes.forEach(n => outCount[n.id] = 0);
+  map.connections.forEach(c => { if (outCount[c.fromNodeId] !== undefined) outCount[c.fromNodeId]++; });
+  let rootId = map.nodes[0].id;
+  let maxOut = -1;
+  Object.entries(outCount).forEach(([id, count]) => { if (count > maxOut) { maxOut = count; rootId = id; } });
+
+  const positions = {};
+  if (type === 'tree') layoutTree(map, rootId, positions);
+  else if (type === 'radial') layoutRadial(map, rootId, positions);
+  else if (type === 'force') layoutForce(map, positions);
+
+  // Animate
+  animateLayout(map, positions);
+  // Highlight active layout button
+  document.querySelectorAll('.layout-btn').forEach(b => b.classList.remove('bg-amber-500/20', 'text-amber-400'));
+  const btn = document.querySelector(`.layout-btn[data-layout="${type}"]`);
+  if (btn) { btn.classList.add('bg-amber-500/20', 'text-amber-400'); }
+}
+
+function layoutTree(map, rootId, positions) {
+  const children = {};
+  map.nodes.forEach(n => children[n.id] = []);
+  map.connections.forEach(c => { if (children[c.fromNodeId]) children[c.fromNodeId].push(c.toNodeId); });
+  const visited = new Set();
+  const levels = {};
+  function bfs(startId) {
+    const q = [{ id: startId, level: 0 }];
+    visited.add(startId);
+    while (q.length) {
+      const { id, level } = q.shift();
+      if (!levels[level]) levels[level] = [];
+      levels[level].push(id);
+      (children[id] || []).forEach(cid => { if (!visited.has(cid)) { visited.add(cid); q.push({ id: cid, level: level + 1 }); } });
+    }
+  }
+  bfs(rootId);
+  // Add orphans
+  map.nodes.forEach(n => { if (!visited.has(n.id)) { const lk = Object.keys(levels).length; if (!levels[lk]) levels[lk] = []; levels[lk].push(n.id); } });
+  const hGap = 260, vGap = 140;
+  Object.entries(levels).forEach(([lvl, ids]) => {
+    const totalW = ids.length * hGap;
+    ids.forEach((id, i) => {
+      positions[id] = { x: i * hGap - totalW / 2 + hGap / 2, y: parseInt(lvl) * vGap };
+    });
+  });
+}
+
+function layoutRadial(map, rootId, positions) {
+  const children = {};
+  map.nodes.forEach(n => children[n.id] = []);
+  map.connections.forEach(c => { if (children[c.fromNodeId]) children[c.fromNodeId].push(c.toNodeId); });
+  const visited = new Set();
+  const levels = {};
+  function bfs(startId) {
+    const q = [{ id: startId, level: 0 }];
+    visited.add(startId);
+    while (q.length) {
+      const { id, level } = q.shift();
+      if (!levels[level]) levels[level] = [];
+      levels[level].push(id);
+      (children[id] || []).forEach(cid => { if (!visited.has(cid)) { visited.add(cid); q.push({ id: cid, level: level + 1 }); } });
+    }
+  }
+  bfs(rootId);
+  map.nodes.forEach(n => { if (!visited.has(n.id)) { const lk = Object.keys(levels).length; if (!levels[lk]) levels[lk] = []; levels[lk].push(n.id); } });
+  positions[rootId] = { x: 0, y: 0 };
+  Object.entries(levels).forEach(([lvl, ids]) => {
+    if (parseInt(lvl) === 0) return;
+    const radius = parseInt(lvl) * 250;
+    ids.forEach((id, i) => {
+      const angle = (i / ids.length) * Math.PI * 2 - Math.PI / 2;
+      positions[id] = { x: Math.cos(angle) * radius, y: Math.sin(angle) * radius };
+    });
+  });
+}
+
+function layoutForce(map, positions) {
+  // Initialize positions randomly if needed
+  map.nodes.forEach(n => {
+    positions[n.id] = { x: n.position.x || (Math.random() - 0.5) * 800, y: n.position.y || (Math.random() - 0.5) * 600 };
+  });
+  const iterations = 60;
+  const repulsion = 50000;
+  const attraction = 0.005;
+  const damping = 0.9;
+  const vel = {};
+  map.nodes.forEach(n => vel[n.id] = { x: 0, y: 0 });
+  for (let iter = 0; iter < iterations; iter++) {
+    // Repulsion between all pairs
+    for (let i = 0; i < map.nodes.length; i++) {
+      for (let j = i + 1; j < map.nodes.length; j++) {
+        const a = map.nodes[i].id, b = map.nodes[j].id;
+        let dx = positions[a].x - positions[b].x;
+        let dy = positions[a].y - positions[b].y;
+        let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        let force = repulsion / (dist * dist);
+        let fx = (dx / dist) * force;
+        let fy = (dy / dist) * force;
+        vel[a].x += fx; vel[a].y += fy;
+        vel[b].x -= fx; vel[b].y -= fy;
+      }
+    }
+    // Attraction along connections
+    map.connections.forEach(c => {
+      if (!positions[c.fromNodeId] || !positions[c.toNodeId]) return;
+      let dx = positions[c.toNodeId].x - positions[c.fromNodeId].x;
+      let dy = positions[c.toNodeId].y - positions[c.fromNodeId].y;
+      let fx = dx * attraction;
+      let fy = dy * attraction;
+      vel[c.fromNodeId].x += fx; vel[c.fromNodeId].y += fy;
+      vel[c.toNodeId].x -= fx; vel[c.toNodeId].y -= fy;
+    });
+    // Apply velocity with damping
+    map.nodes.forEach(n => {
+      vel[n.id].x *= damping;
+      vel[n.id].y *= damping;
+      positions[n.id].x += vel[n.id].x;
+      positions[n.id].y += vel[n.id].y;
+    });
+  }
+}
+
+function animateLayout(map, targetPositions) {
+  const startPositions = {};
+  map.nodes.forEach(n => startPositions[n.id] = { x: n.position.x, y: n.position.y });
+  const duration = 600;
+  const startTime = performance.now();
+  function step(time) {
+    const t = Math.min((time - startTime) / duration, 1);
+    const ease = t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; // easeInOut
+    map.nodes.forEach(n => {
+      if (targetPositions[n.id]) {
+        n.position.x = startPositions[n.id].x + (targetPositions[n.id].x - startPositions[n.id].x) * ease;
+        n.position.y = startPositions[n.id].y + (targetPositions[n.id].y - startPositions[n.id].y) * ease;
+      }
+    });
+    renderCanvas();
+    if (t < 1) requestAnimationFrame(step);
+    else { saveAll(); setTimeout(fitToScreen, 50); }
+  }
+  requestAnimationFrame(step);
+}
+
+// ==================== MODALS ====================
+function showModal(html) {
+  const modal = document.getElementById('modal');
+  modal.className = '';
+  modal.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)hideModal()"><div class="modal-box">${html}</div></div>`;
+}
+function hideModal() { document.getElementById('modal').className = 'hidden'; document.getElementById('modal').innerHTML = ''; }
+
+function showEditModal(nodeId) {
+  const map = getMap();
+  if (!map) return;
+  const node = map.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const typeOptions = Object.keys(NODE_TYPES).map(t => `<option value="${t}" ${node.type === t ? 'selected' : ''}>${NODE_TYPES[t].label}</option>`).join('');
+  const prioOptions = PRIORITIES.map(p => `<option value="${p}" ${node.priority === p ? 'selected' : ''}>${p}</option>`).join('');
+  const statusOptions = STATUSES.map(s => `<option value="${s}" ${node.status === s ? 'selected' : ''}>${s}</option>`).join('');
+  showModal(`
+    <h3>Edit Node</h3>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div><label class="modal-label">Title</label><input class="modal-input" id="edit-title" value="${escHtml(node.title)}"></div>
+      <div><label class="modal-label">Description</label><textarea class="modal-input" id="edit-desc" rows="3">${escHtml(node.description)}</textarea></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label class="modal-label">Type</label><select class="modal-select" id="edit-type">${typeOptions}</select></div>
+        <div><label class="modal-label">Priority</label><select class="modal-select" id="edit-priority">${prioOptions}</select></div>
+        <div><label class="modal-label">Status</label><select class="modal-select" id="edit-status">${statusOptions}</select></div>
+        <div><label class="modal-label">Owner</label><input class="modal-input" id="edit-owner" value="${escHtml(node.owner)}"></div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+        <button class="btn-ghost" onclick="hideModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveEditModal('${node.id}')">Save</button>
+      </div>
+    </div>
+  `);
+  setTimeout(() => document.getElementById('edit-title')?.focus(), 100);
+}
+function saveEditModal(nodeId) {
+  const map = getMap();
+  if (!map) return;
+  const node = map.nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  node.title = document.getElementById('edit-title').value || 'Untitled';
+  node.description = document.getElementById('edit-desc').value || '';
+  node.type = document.getElementById('edit-type').value;
+  node.priority = document.getElementById('edit-priority').value;
+  node.status = document.getElementById('edit-status').value;
+  node.owner = document.getElementById('edit-owner').value;
+  node.color = NODE_TYPES[node.type]?.color;
+  saveAll();
+  hideModal();
+  renderCanvas();
+}
+function editSelectedNode() { if (state.selectedNodeId) showEditModal(state.selectedNodeId); hideContextMenu(); }
+
+function showNewMapModal() {
+  showModal(`
+    <h3>New Mind Map</h3>
+    <div style="display:flex;flex-direction:column;gap:12px;">
+      <div><label class="modal-label">Name</label><input class="modal-input" id="new-map-name" placeholder="My Mind Map"></div>
+      <div><label class="modal-label">Description</label><input class="modal-input" id="new-map-desc" placeholder="Optional description"></div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px;">
+        <button class="btn-ghost" onclick="hideModal()">Cancel</button>
+        <button class="btn-primary" onclick="createMapFromModal()">Create</button>
+      </div>
+    </div>
+  `);
+  setTimeout(() => document.getElementById('new-map-name')?.focus(), 100);
+}
+function createMapFromModal() {
+  const name = document.getElementById('new-map-name').value || 'Untitled Map';
+  const desc = document.getElementById('new-map-desc').value || '';
+  createMap(name, desc);
+  hideModal();
+  toast('Map created!', 'success');
+}
+
+// ==================== CONTEXT MENU ====================
+function showContextMenu(x, y) {
+  const menu = document.getElementById('context-menu');
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.remove('hidden');
+}
+function hideContextMenu() { document.getElementById('context-menu').classList.add('hidden'); }
+
+// ==================== SIDEBAR TOGGLE ====================
+function toggleSidebar() {
+  state.sidebarOpen = !state.sidebarOpen;
+  document.getElementById('sidebar').style.transform = state.sidebarOpen ? '' : 'translateX(-100%)';
+  document.getElementById('main').style.marginLeft = state.sidebarOpen ? '14rem' : '0';
+  document.getElementById('sidebar-expand').classList.toggle('hidden', state.sidebarOpen);
+}
+
+// ==================== EXPORT / IMPORT ====================
+function exportMap() {
+  const map = getMap();
+  if (!map) return;
+  const blob = new Blob([JSON.stringify(map, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (map.name || 'mindmap').replace(/[^a-z0-9]/gi, '_') + '.json';
+  a.click();
+  toast('Map exported!', 'success');
+}
+function importMap() { document.getElementById('import-input').click(); }
+function handleImport(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const map = JSON.parse(reader.result);
+      if (!map.nodes) throw new Error('Invalid map');
+      map.id = uid();
+      state.maps.push(map);
+      state.activeMapId = map.id;
+      saveAll();
+      renderSidebar();
+      renderCanvas();
+      toast('Map imported!', 'success');
+    } catch(err) { toast('Invalid map file', 'error'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+// ==================== DEMO SEED DATA ====================
+function seedDemoData() {
+  // Map 1: Interceptor Drone System Decomposition
+  const map1 = {
+    id: 'demo_sys_decomp', name: 'Interceptor Drone — System Decomposition',
+    description: 'Complete system decomposition from high-level function to specific requirements',
+    nodes: [
+      { id: 'n1', title: 'Interceptor Drone C-UAS', type: 'Function', position:{x:600,y:50}, size:{w:240,h:80}, priority:'Critical', status:'Active', owner:'Systems Engineering', description:'Complete unmanned aerial interceptor system for counter-UAS operations', linkedApp:null, linkedId:null, color:null },
+      { id: 'n2', title: 'Propulsion Subsystem', type: 'Component', position:{x:50,y:250}, size:{w:200,h:72}, priority:'High', status:'Active', owner:'Propulsion Team', description:'Motor, ESC, propellers, and battery system', linkedApp:'reqforge', linkedId:'REQ-80', color:null },
+      { id: 'n3', title: 'Guidance & Navigation', type: 'Component', position:{x:320,y:250}, size:{w:200,h:72}, priority:'High', status:'Active', owner:'GNC Team', description:'INS/GPS, target tracking, path planning', linkedApp:null, linkedId:null, color:null },
+      { id: 'n4', title: 'C2 Datalink', type: 'Component', position:{x:590,y:250}, size:{w:200,h:72}, priority:'Critical', status:'Active', owner:'Comms Team', description:'Encrypted command & control communication', linkedApp:'scrum', linkedId:'STORY-42', color:null },
+      { id: 'n5', title: 'Interceptor Mechanism', type: 'Component', position:{x:860,y:250}, size:{w:200,h:72}, priority:'Critical', status:'Active', owner:'Payload Team', description:'Kinetic or net-based intercept system', linkedApp:null, linkedId:null, color:null },
+      { id: 'n6', title: 'Ground Control Station', type: 'Component', position:{x:1130,y:250}, size:{w:200,h:72}, priority:'Medium', status:'Active', owner:'GCS Team', description:'Operator interface and mission control', linkedApp:null, linkedId:null, color:null },
+      // Propulsion functions
+      { id: 'n7', title: 'Generate Thrust', type: 'Function', position:{x:0,y:450}, size:{w:180,h:68}, priority:'Critical', status:'Active', owner:'', description:'Produce sufficient thrust for takeoff and flight', linkedApp:null, linkedId:null, color:null },
+      { id: 'n8', title: 'Control Thrust Output', type: 'Function', position:{x:200,y:450}, size:{w:180,h:68}, priority:'High', status:'Active', owner:'', description:'Variable thrust 0-100% with fast response', linkedApp:null, linkedId:null, color:null },
+      // Guidance functions
+      { id: 'n9', title: 'Track Target', type: 'Function', position:{x:320,y:450}, size:{w:180,h:68}, priority:'Critical', status:'Active', owner:'', description:'Continuous target tracking and position update', linkedApp:null, linkedId:null, color:null },
+      { id: 'n10', title: 'Navigate to Intercept', type: 'Function', position:{x:520,y:450}, size:{w:180,h:68}, priority:'Critical', status:'Active', owner:'', description:'Calculate and execute intercept trajectory', linkedApp:null, linkedId:null, color:null },
+      // C2 functions
+      { id: 'n11', title: 'Secure Communication', type: 'Function', position:{x:720,y:450}, size:{w:180,h:68}, priority:'Critical', status:'Active', owner:'', description:'AES-256 encrypted bidirectional datalink', linkedApp:null, linkedId:null, color:null },
+      // Requirements
+      { id: 'n12', title: 'Min Thrust > 15 kgf', type: 'Requirement', position:{x:0,y:640}, size:{w:180,h:68}, priority:'Critical', status:'Active', owner:'', description:'Minimum thrust output for takeoff and sustained flight', linkedApp:'reqforge', linkedId:'REQ-85', color:null },
+      { id: 'n13', title: 'Thrust Control 0-100%', type: 'Requirement', position:{x:200,y:640}, size:{w:180,h:68}, priority:'High', status:'Active', owner:'', description:'Continuous thrust modulation with <50ms response', linkedApp:null, linkedId:null, color:null },
+      { id: 'n14', title: 'Target Track < 50ms Latency', type: 'Requirement', position:{x:400,y:640}, size:{w:200,h:68}, priority:'Critical', status:'Active', owner:'', description:'Real-time target position update', linkedApp:'reqforge', linkedId:'REQ-83', color:null },
+      { id: 'n15', title: 'AES-256 Encryption', type: 'Requirement', position:{x:630,y:640}, size:{w:200,h:68}, priority:'Critical', status:'Active', owner:'', description:'All C2 links shall use AES-256', linkedApp:'reqforge', linkedId:'REQ-82', color:null },
+      // Test cases
+      { id: 'n16', title: 'TC: Thrust Performance', type: 'TestCase', position:{x:0,y:830}, size:{w:180,h:68}, priority:'High', status:'Completed', owner:'Test Engineer', description:'Measure thrust output at various RPM', linkedApp:null, linkedId:null, color:null },
+      { id: 'n17', title: 'TC: Encryption Verification', type: 'TestCase', position:{x:630,y:830}, size:{w:200,h:68}, priority:'Critical', status:'Active', owner:'Security Team', description:'Verify AES-256 on all datalink channels', linkedApp:null, linkedId:null, color:null },
+    ],
+    connections: [
+      { id:'c1', fromNodeId:'n1', toNodeId:'n2', type:'decomposes into' },
+      { id:'c2', fromNodeId:'n1', toNodeId:'n3', type:'decomposes into' },
+      { id:'c3', fromNodeId:'n1', toNodeId:'n4', type:'decomposes into' },
+      { id:'c4', fromNodeId:'n1', toNodeId:'n5', type:'decomposes into' },
+      { id:'c5', fromNodeId:'n1', toNodeId:'n6', type:'decomposes into' },
+      { id:'c6', fromNodeId:'n2', toNodeId:'n7', type:'decomposes into' },
+      { id:'c7', fromNodeId:'n2', toNodeId:'n8', type:'decomposes into' },
+      { id:'c8', fromNodeId:'n3', toNodeId:'n9', type:'decomposes into' },
+      { id:'c9', fromNodeId:'n3', toNodeId:'n10', type:'decomposes into' },
+      { id:'c10', fromNodeId:'n4', toNodeId:'n11', type:'decomposes into' },
+      { id:'c11', fromNodeId:'n7', toNodeId:'n12', type:'decomposes into' },
+      { id:'c12', fromNodeId:'n8', toNodeId:'n13', type:'decomposes into' },
+      { id:'c13', fromNodeId:'n9', toNodeId:'n14', type:'decomposes into' },
+      { id:'c14', fromNodeId:'n11', toNodeId:'n15', type:'decomposes into' },
+      { id:'c15', fromNodeId:'n12', toNodeId:'n16', type:'verified by' },
+      { id:'c16', fromNodeId:'n15', toNodeId:'n17', type:'verified by' },
+    ],
+    groups: [
+      { id:'g1', title:'Propulsion', nodeIds:['n2','n7','n8','n12','n13','n16'], color:'#22c55e' },
+      { id:'g2', title:'Guidance & Nav', nodeIds:['n3','n9','n10','n14'], color:'#3b82f6' },
+      { id:'g3', title:'C2 Datalink', nodeIds:['n4','n11','n15','n17'], color:'#8b5cf6' },
+    ]
+  };
+
+  // Map 2: Drone Propulsion FMEA
+  const map2 = {
+    id: 'demo_fmea', name: 'Drone Propulsion — FMEA Analysis',
+    description: 'Failure Mode and Effects Analysis for the propulsion subsystem',
+    nodes: [
+      { id: 'f1', title: 'Propulsion Subsystem', type: 'Component', position:{x:500,y:50}, size:{w:220,h:80}, priority:'Critical', status:'Active', owner:'Systems Engineering', description:'Complete propulsion system FMEA', linkedApp:null, linkedId:null, color:null },
+      // Failure modes
+      { id: 'f2', title: 'Motor Burnout', type: 'FailureMode', position:{x:50,y:280}, size:{w:180,h:72}, priority:'High', status:'Active', owner:'', description:'Motor winding insulation failure due to overtemperature', linkedApp:null, linkedId:null, color:null },
+      { id: 'f3', title: 'ESC Failure', type: 'FailureMode', position:{x:300,y:280}, size:{w:180,h:72}, priority:'Critical', status:'Active', owner:'', description:'Electronic speed controller MOSFET or capacitor failure', linkedApp:null, linkedId:null, color:null },
+      { id: 'f4', title: 'Propeller Damage', type: 'FailureMode', position:{x:550,y:280}, size:{w:180,h:72}, priority:'Medium', status:'Active', owner:'', description:'Blade crack, tip damage, or delamination', linkedApp:null, linkedId:null, color:null },
+      { id: 'f5', title: 'Battery Failure', type: 'FailureMode', position:{x:800,y:280}, size:{w:180,h:72}, priority:'Critical', status:'Active', owner:'', description:'LiPo cell swelling, voltage sag, or thermal runaway', linkedApp:null, linkedId:null, color:null },
+      // Causes
+      { id: 'f6', title: 'Prolonged High Current', type: 'Generic', position:{x:0,y:500}, size:{w:170,h:64}, priority:'Medium', status:'Active', owner:'', description:'Sustained high-current operation exceeds thermal design', linkedApp:null, linkedId:null, color:'#71717a' },
+      { id: 'f7', title: 'High Ambient Temp', type: 'Generic', position:{x:180,y:500}, size:{w:170,h:64}, priority:'Low', status:'Active', owner:'', description:'Operating in >45C desert environment', linkedApp:null, linkedId:null, color:'#71717a' },
+      { id: 'f8', title: 'Voltage Spike', type: 'Generic', position:{x:340,y:500}, size:{w:170,h:64}, priority:'Medium', status:'Active', owner:'', description:'Regenerative braking or inductive spike damages ESC', linkedApp:null, linkedId:null, color:'#71717a' },
+      { id: 'f9', title: 'FOD Impact', type: 'Generic', position:{x:550,y:500}, size:{w:170,h:64}, priority:'Medium', status:'Active', owner:'', description:'Foreign object damage during high-speed flight', linkedApp:null, linkedId:null, color:'#71717a' },
+      { id: 'f10', title: 'Overdischarge', type: 'Generic', position:{x:750,y:500}, size:{w:170,h:64}, priority:'High', status:'Active', owner:'', description:'Cells discharged below safe voltage threshold', linkedApp:null, linkedId:null, color:'#71717a' },
+      // Effects
+      { id: 'f11', title: 'Loss of Thrust', type: 'FailureMode', position:{x:100,y:700}, size:{w:180,h:64}, priority:'Critical', status:'Active', owner:'', description:'Complete or partial loss of thrust on one or more motors', linkedApp:null, linkedId:null, color:null },
+      { id: 'f12', title: 'Uncontrolled Descent', type: 'FailureMode', position:{x:400,y:700}, size:{w:180,h:64}, priority:'Critical', status:'Active', owner:'', description:'Vehicle enters uncontrolled descent, mission failure', linkedApp:null, linkedId:null, color:null },
+      { id: 'f13', title: 'Fire Hazard', type: 'FailureMode', position:{x:700,y:700}, size:{w:180,h:64}, priority:'Critical', status:'Active', owner:'', description:'Thermal runaway causing fire risk', linkedApp:null, linkedId:null, color:null },
+      // Mitigations
+      { id: 'f14', title: 'Motor Cooling System', type: 'Requirement', position:{x:0,y:900}, size:{w:190,h:68}, priority:'High', status:'Active', owner:'', description:'Implement active or passive motor cooling', linkedApp:null, linkedId:null, color:null },
+      { id: 'f15', title: 'Temperature Monitoring', type: 'Requirement', position:{x:210,y:900}, size:{w:190,h:68}, priority:'High', status:'Active', owner:'', description:'Real-time temperature sensors on all motors and ESCs', linkedApp:null, linkedId:null, color:null },
+      { id: 'f16', title: 'Motor Redundancy (N+1)', type: 'Requirement', position:{x:420,y:900}, size:{w:190,h:68}, priority:'Critical', status:'Active', owner:'', description:'Hexacopter or octocopter for single-motor-out capability', linkedApp:null, linkedId:null, color:null },
+      { id: 'f17', title: 'Battery Management System', type: 'Requirement', position:{x:630,y:900}, size:{w:190,h:68}, priority:'Critical', status:'Active', owner:'', description:'Cell-level monitoring with auto-cutoff on anomaly', linkedApp:'reqforge', linkedId:'REQ-88', color:null },
+      { id: 'f18', title: 'TC: Thermal Stress Test', type: 'TestCase', position:{x:100,y:1080}, size:{w:190,h:68}, priority:'High', status:'Active', owner:'Test Engineer', description:'Run motor at max current for 10min and verify temps', linkedApp:null, linkedId:null, color:null },
+    ],
+    connections: [
+      { id:'fc1', fromNodeId:'f1', toNodeId:'f2', type:'decomposes into' },
+      { id:'fc2', fromNodeId:'f1', toNodeId:'f3', type:'decomposes into' },
+      { id:'fc3', fromNodeId:'f1', toNodeId:'f4', type:'decomposes into' },
+      { id:'fc4', fromNodeId:'f1', toNodeId:'f5', type:'decomposes into' },
+      { id:'fc5', fromNodeId:'f6', toNodeId:'f2', type:'causes' },
+      { id:'fc6', fromNodeId:'f7', toNodeId:'f2', type:'causes' },
+      { id:'fc7', fromNodeId:'f8', toNodeId:'f3', type:'causes' },
+      { id:'fc8', fromNodeId:'f9', toNodeId:'f4', type:'causes' },
+      { id:'fc9', fromNodeId:'f10', toNodeId:'f5', type:'causes' },
+      { id:'fc10', fromNodeId:'f2', toNodeId:'f11', type:'causes' },
+      { id:'fc11', fromNodeId:'f3', toNodeId:'f11', type:'causes' },
+      { id:'fc12', fromNodeId:'f11', toNodeId:'f12', type:'causes' },
+      { id:'fc13', fromNodeId:'f5', toNodeId:'f13', type:'causes' },
+      { id:'fc14', fromNodeId:'f14', toNodeId:'f2', type:'mitigates' },
+      { id:'fc15', fromNodeId:'f15', toNodeId:'f2', type:'mitigates' },
+      { id:'fc16', fromNodeId:'f15', toNodeId:'f3', type:'mitigates' },
+      { id:'fc17', fromNodeId:'f16', toNodeId:'f11', type:'mitigates' },
+      { id:'fc18', fromNodeId:'f17', toNodeId:'f5', type:'mitigates' },
+      { id:'fc19', fromNodeId:'f14', toNodeId:'f18', type:'verified by' },
+    ],
+    groups: [
+      { id:'fg1', title:'Failure Modes', nodeIds:['f2','f3','f4','f5'], color:'#ef4444' },
+      { id:'fg2', title:'Root Causes', nodeIds:['f6','f7','f8','f9','f10'], color:'#71717a' },
+      { id:'fg3', title:'Effects', nodeIds:['f11','f12','f13'], color:'#f59e0b' },
+      { id:'fg4', title:'Mitigations', nodeIds:['f14','f15','f16','f17','f18'], color:'#22c55e' },
+    ]
+  };
+
+  state.maps = [map1, map2];
+  state.activeMapId = map1.id;
+  saveAll();
+}
+
+// ==================== EVENT HANDLERS ====================
+function setupEvents() {
+  const container = document.getElementById('canvas-container');
+  const svg = document.getElementById('canvas-svg');
+
+  // Wheel zoom
+  container.addEventListener('wheel', e => {
+    e.preventDefault();
+    const rect = svg.getBoundingClientRect();
+    const mx = (e.clientX - rect.left) / state.zoom + state.panX;
+    const my = (e.clientY - rect.top) / state.zoom + state.panY;
+    const factor = e.deltaY < 0 ? 1.08 : 1 / 1.08;
+    setZoom(state.zoom * factor, mx, my);
+  }, { passive: false });
+
+  // Mouse down on canvas
+  svg.addEventListener('mousedown', e => {
+    hideContextMenu();
+    const pos = screenToCanvas(e.clientX, e.clientY);
+
+    // Check if clicking on a connector
+    if (e.target.classList.contains('connector')) {
+      const nodeG = e.target.closest('.mind-node');
+      if (nodeG) {
+        state.connectingFrom = nodeG.dataset.nodeId;
+        state.connectingMouse = pos;
+        container.classList.add('connecting');
+        e.preventDefault();
+        return;
+      }
+    }
+
+    // Check if clicking on a node
+    const nodeG = e.target.closest('.mind-node');
+    if (nodeG && e.button === 0) {
+      const nodeId = nodeG.dataset.nodeId;
+      state.selectedNodeId = nodeId;
+      state.draggingNodeId = nodeId;
+      const map = getMap();
+      const node = map?.nodes.find(n => n.id === nodeId);
+      if (node) {
+        state.dragStartX = e.clientX;
+        state.dragStartY = e.clientY;
+        state.nodeDragStartX = node.position.x;
+        state.nodeDragStartY = node.position.y;
+      }
+      renderCanvas();
+      e.preventDefault();
+      return;
+    }
+
+    // Panning (middle click, or left click on empty space, or space+left)
+    if (e.button === 1 || (e.button === 0 && !nodeG) || state.spaceDown) {
+      state.isPanning = true;
+      state.panStartX = e.clientX;
+      state.panStartY = e.clientY;
+      state.panStartPanX = state.panX;
+      state.panStartPanY = state.panY;
+      container.classList.add('panning');
+      if (e.button === 0 && !nodeG) { state.selectedNodeId = null; renderCanvas(); }
+      e.preventDefault();
+    }
+  });
+
+  // Mouse move
+  window.addEventListener('mousemove', e => {
+    // Dragging a node
+    if (state.draggingNodeId) {
+      const map = getMap();
+      const node = map?.nodes.find(n => n.id === state.draggingNodeId);
+      if (node) {
+        node.position.x = state.nodeDragStartX + (e.clientX - state.dragStartX) / state.zoom;
+        node.position.y = state.nodeDragStartY + (e.clientY - state.dragStartY) / state.zoom;
+        renderCanvas();
+      }
+      return;
+    }
+    // Panning
+    if (state.isPanning) {
+      state.panX = state.panStartPanX - (e.clientX - state.panStartX) / state.zoom;
+      state.panY = state.panStartPanY - (e.clientY - state.panStartY) / state.zoom;
+      updateViewBox();
+      return;
+    }
+    // Drawing connection
+    if (state.connectingFrom) {
+      state.connectingMouse = screenToCanvas(e.clientX, e.clientY);
+      renderDragConnection();
+    }
+  });
+
+  // Mouse up
+  window.addEventListener('mouseup', e => {
+    if (state.draggingNodeId) {
+      state.draggingNodeId = null;
+      saveAll();
+    }
+    if (state.isPanning) {
+      state.isPanning = false;
+      container.classList.remove('panning');
+    }
+    if (state.connectingFrom) {
+      container.classList.remove('connecting');
+      // Check if released on a node
+      const nodeG = e.target.closest?.('.mind-node');
+      if (nodeG && nodeG.dataset.nodeId !== state.connectingFrom) {
+        addConnection(state.connectingFrom, nodeG.dataset.nodeId);
+      }
+      state.connectingFrom = null;
+      state.connectingMouse = null;
+      document.getElementById('drag-connection-layer').innerHTML = '';
+    }
+  });
+
+  // Double click to edit
+  svg.addEventListener('dblclick', e => {
+    const nodeG = e.target.closest('.mind-node');
+    if (nodeG) showEditModal(nodeG.dataset.nodeId);
+  });
+
+  // Right click context menu
+  svg.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const nodeG = e.target.closest('.mind-node');
+    if (nodeG) {
+      state.selectedNodeId = nodeG.dataset.nodeId;
+      renderCanvas();
+      showContextMenu(e.clientX, e.clientY);
+    }
+  });
+
+  // Click outside context menu
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#context-menu')) hideContextMenu();
+  });
+
+  // Keyboard
+  window.addEventListener('keydown', e => {
+    if (e.code === 'Space' && !e.target.closest('input,textarea,select')) { state.spaceDown = true; e.preventDefault(); }
+    if (e.code === 'Delete' || e.code === 'Backspace') {
+      if (!e.target.closest('input,textarea,select') && state.selectedNodeId) { deleteSelectedNode(); }
+    }
+    if (e.code === 'Escape') { state.selectedNodeId = null; hideContextMenu(); hideModal(); renderCanvas(); }
+  });
+  window.addEventListener('keyup', e => { if (e.code === 'Space') state.spaceDown = false; });
+
+  // Badge click (linked nodes)
+  svg.addEventListener('click', e => {
+    if (e.target.classList.contains('node-badge') || e.target.closest('.node-badge')) {
+      const nodeG = e.target.closest('.mind-node');
+      if (nodeG) {
+        const map = getMap();
+        const node = map?.nodes.find(n => n.id === nodeG.dataset.nodeId);
+        if (node?.linkedApp) {
+          const urls = { scrum: 'https://scrum-app.pages.dev/?demo=true', reqforge: 'https://req-management.pages.dev/?demo=true', alm: 'https://alm-app.pages.dev/?demo=true' };
+          window.open(urls[node.linkedApp] || '#', '_blank');
+        }
+      }
+    }
+  });
+}
+
+function renderDragConnection() {
+  const map = getMap();
+  if (!map || !state.connectingFrom || !state.connectingMouse) return;
+  const fromNode = map.nodes.find(n => n.id === state.connectingFrom);
+  if (!fromNode) return;
+  const fx = fromNode.position.x + (fromNode.size?.w || DEFAULT_NODE_W) / 2;
+  const fy = fromNode.position.y + (fromNode.size?.h || DEFAULT_NODE_H) / 2;
+  const tx = state.connectingMouse.x, ty = state.connectingMouse.y;
+  const dx = tx - fx;
+  document.getElementById('drag-connection-layer').innerHTML =
+    `<path d="M${fx},${fy} C${fx + dx*0.4},${fy} ${tx - dx*0.4},${ty} ${tx},${ty}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6,3" fill="none" opacity="0.6"/>`;
+}
+
+// ==================== SSO LISTENER ====================
+window.addEventListener('message', e => {
+  if (e.data?.type === 'admin-auth' && e.data.sso) {
+    const u = e.data.sso;
+    document.getElementById('user-info').innerHTML = `
+      ${u.photoURL ? `<img src="${u.photoURL}" style="width:24px;height:24px;border-radius:50%;border:1px solid rgba(245,158,11,0.5);" referrerpolicy="no-referrer">` : `<div class="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-[10px] font-bold text-black">${(u.displayName||u.email||'?')[0].toUpperCase()}</div>`}
+      <span class="font-mono text-[10px] text-zinc-400">${u.displayName || u.email}</span>
+    `;
+  }
+  if (e.data?.type === 'theme-change' && e.data.theme) applyTheme(e.data.theme);
+});
+
+// ==================== INIT ====================
+function init() {
+  applyTheme(state.theme);
+  if (DEMO_MODE) document.getElementById('demo-banner').classList.remove('hidden');
+  // Adjust for demo banner
+  if (DEMO_MODE) {
+    document.getElementById('sidebar').style.paddingTop = '36px';
+    document.getElementById('main').style.paddingTop = '36px';
+  }
+  loadAll();
+  if (!state.maps.length) seedDemoData();
+  if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
+  setupEvents();
+  renderSidebar();
+  renderCanvas();
+  setTimeout(fitToScreen, 200);
+}
+init();
+</script>
+</body>
+</html>
