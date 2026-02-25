@@ -8,6 +8,374 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.0/firebase-auth-compat.js"></script>
+<!-- Demo Mode: Local Database Shim -->
+<script>
+(function() {
+  // Check if demo mode is active
+  var params = new URLSearchParams(window.location.search);
+  var isDemoFromURL = params.get('demo') === 'true' || params.get('mode') === 'demo';
+  var isDemoFromLS = localStorage.getItem('app_demo_mode') === 'true';
+  window.DEMO_MODE = isDemoFromURL || isDemoFromLS;
+
+  if (isDemoFromURL && !isDemoFromLS) {
+    localStorage.setItem('app_demo_mode', 'true');
+  }
+
+  if (!window.DEMO_MODE) return;
+
+  console.log('[Demo Mode] Active - using local database');
+
+  // ===== Local Storage Database =====
+  var DB_PREFIX = 'demo_db_';
+
+  function getStore(path) {
+    var key = DB_PREFIX + path;
+    try { return JSON.parse(localStorage.getItem(key)) || {}; }
+    catch(e) { return {}; }
+  }
+
+  function setStore(path, data) {
+    localStorage.setItem(DB_PREFIX + path, JSON.stringify(data));
+    notifyListeners(path);
+  }
+
+  function genId() {
+    return 'demo_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+  }
+
+  // ===== Snapshot Listeners =====
+  var listeners = {};
+
+  function addListener(path, cb) {
+    if (!listeners[path]) listeners[path] = [];
+    listeners[path].push(cb);
+    return function() {
+      listeners[path] = (listeners[path] || []).filter(function(fn) { return fn !== cb; });
+    };
+  }
+
+  function notifyListeners(path) {
+    // Notify exact path listeners
+    (listeners[path] || []).forEach(function(cb) {
+      try { cb(); } catch(e) { console.warn('[Demo] listener error:', e); }
+    });
+    // Notify parent collection listeners
+    var parts = path.split('/');
+    for (var i = parts.length - 1; i > 0; i--) {
+      var parent = parts.slice(0, i).join('/');
+      (listeners[parent] || []).forEach(function(cb) {
+        try { cb(); } catch(e) {}
+      });
+    }
+  }
+
+  // ===== Query Implementation =====
+  function applyWhere(docs, field, op, value) {
+    return docs.filter(function(d) {
+      var v = field.split('.').reduce(function(o, k) { return o && o[k]; }, d.data);
+      switch(op) {
+        case '==': return v === value;
+        case '!=': return v !== value;
+        case '<': return v < value;
+        case '<=': return v <= value;
+        case '>': return v > value;
+        case '>=': return v >= value;
+        case 'in': return Array.isArray(value) && value.indexOf(v) >= 0;
+        case 'array-contains': return Array.isArray(v) && v.indexOf(value) >= 0;
+        default: return true;
+      }
+    });
+  }
+
+  function applyOrderBy(docs, field, dir) {
+    return docs.slice().sort(function(a, b) {
+      var va = field.split('.').reduce(function(o, k) { return o && o[k]; }, a.data);
+      var vb = field.split('.').reduce(function(o, k) { return o && o[k]; }, b.data);
+      if (va < vb) return dir === 'desc' ? 1 : -1;
+      if (va > vb) return dir === 'desc' ? -1 : 1;
+      return 0;
+    });
+  }
+
+  // ===== Document Snapshot =====
+  function makeDocSnap(id, data, path) {
+    return {
+      id: id,
+      ref: makeDocRef(path + '/' + id),
+      exists: data !== undefined && data !== null,
+      data: function() { return data ? JSON.parse(JSON.stringify(data)) : undefined; },
+      get: function(field) { return data ? data[field] : undefined; }
+    };
+  }
+
+  // ===== Query Snapshot =====
+  function makeQuerySnap(docs) {
+    return {
+      docs: docs,
+      empty: docs.length === 0,
+      size: docs.length,
+      forEach: function(cb) { docs.forEach(cb); }
+    };
+  }
+
+  // ===== Document Reference =====
+  function makeDocRef(path) {
+    var parts = path.split('/');
+    var docId = parts[parts.length - 1];
+    var colPath = parts.slice(0, -1).join('/');
+
+    return {
+      id: docId,
+      path: path,
+      parent: { path: colPath },
+      collection: function(subCol) {
+        return makeCollRef(path + '/' + subCol);
+      },
+      get: function() {
+        var store = getStore(colPath);
+        var data = store[docId] || null;
+        return Promise.resolve(makeDocSnap(docId, data, colPath));
+      },
+      set: function(data, opts) {
+        var store = getStore(colPath);
+        if (opts && opts.merge && store[docId]) {
+          store[docId] = Object.assign({}, store[docId], data);
+        } else {
+          store[docId] = JSON.parse(JSON.stringify(data));
+        }
+        setStore(colPath, store);
+        return Promise.resolve();
+      },
+      update: function(data) {
+        var store = getStore(colPath);
+        if (!store[docId]) store[docId] = {};
+        Object.keys(data).forEach(function(k) { store[docId][k] = data[k]; });
+        setStore(colPath, store);
+        return Promise.resolve();
+      },
+      delete: function() {
+        var store = getStore(colPath);
+        delete store[docId];
+        setStore(colPath, store);
+        return Promise.resolve();
+      },
+      onSnapshot: function(cb, errCb) {
+        var handler = function() {
+          var store = getStore(colPath);
+          var data = store[docId] || null;
+          cb(makeDocSnap(docId, data, colPath));
+        };
+        handler(); // Initial call
+        return addListener(colPath, handler);
+      }
+    };
+  }
+
+  // ===== Collection Reference / Query =====
+  function makeCollRef(path) {
+    return makeQuery(path, []);
+  }
+
+  function makeQuery(path, filters) {
+    var q = {
+      path: path,
+      doc: function(id) {
+        if (!id) id = genId();
+        return makeDocRef(path + '/' + id);
+      },
+      add: function(data) {
+        var id = genId();
+        var store = getStore(path);
+        var docData = JSON.parse(JSON.stringify(data));
+        store[id] = docData;
+        setStore(path, store);
+        var ref = makeDocRef(path + '/' + id);
+        ref._id = id;
+        return Promise.resolve(ref);
+      },
+      where: function(field, op, value) {
+        var newFilters = filters.concat([{ type: 'where', field: field, op: op, value: value }]);
+        return makeQuery(path, newFilters);
+      },
+      orderBy: function(field, dir) {
+        var newFilters = filters.concat([{ type: 'orderBy', field: field, dir: dir || 'asc' }]);
+        return makeQuery(path, newFilters);
+      },
+      limit: function(n) {
+        var newFilters = filters.concat([{ type: 'limit', n: n }]);
+        return makeQuery(path, newFilters);
+      },
+      get: function() {
+        var store = getStore(path);
+        var docs = Object.keys(store).map(function(id) {
+          return { id: id, data: store[id] };
+        });
+        // Apply filters
+        filters.forEach(function(f) {
+          if (f.type === 'where') docs = applyWhere(docs, f.field, f.op, f.value);
+          if (f.type === 'orderBy') docs = applyOrderBy(docs, f.field, f.dir);
+          if (f.type === 'limit') docs = docs.slice(0, f.n);
+        });
+        var snaps = docs.map(function(d) { return makeDocSnap(d.id, d.data, path); });
+        return Promise.resolve(makeQuerySnap(snaps));
+      },
+      onSnapshot: function(cbOrOpts, cbOrErr, errCb) {
+        var cb = typeof cbOrOpts === 'function' ? cbOrOpts : cbOrErr;
+        var handler = function() {
+          var store = getStore(path);
+          var docs = Object.keys(store).map(function(id) {
+            return { id: id, data: store[id] };
+          });
+          filters.forEach(function(f) {
+            if (f.type === 'where') docs = applyWhere(docs, f.field, f.op, f.value);
+            if (f.type === 'orderBy') docs = applyOrderBy(docs, f.field, f.dir);
+            if (f.type === 'limit') docs = docs.slice(0, f.n);
+          });
+          var snaps = docs.map(function(d) { return makeDocSnap(d.id, d.data, path); });
+          cb(makeQuerySnap(snaps));
+        };
+        handler(); // Initial call
+        return addListener(path, handler);
+      }
+    };
+    return q;
+  }
+
+  // ===== Batch Writes =====
+  function makeBatch() {
+    var ops = [];
+    return {
+      set: function(ref, data, opts) { ops.push({ type: 'set', ref: ref, data: data, opts: opts }); },
+      update: function(ref, data) { ops.push({ type: 'update', ref: ref, data: data }); },
+      delete: function(ref) { ops.push({ type: 'delete', ref: ref }); },
+      commit: function() {
+        return Promise.all(ops.map(function(op) {
+          if (op.type === 'set') return op.ref.set(op.data, op.opts);
+          if (op.type === 'update') return op.ref.update(op.data);
+          if (op.type === 'delete') return op.ref.delete();
+        }));
+      }
+    };
+  }
+
+  // ===== Demo User =====
+  var DEMO_USER = {
+    uid: 'demo-user-001',
+    email: 'demo@blacksphereindustries.nl',
+    displayName: 'Demo User',
+    photoURL: null,
+    isAnonymous: false,
+    emailVerified: true,
+    getIdToken: function() { return Promise.resolve('demo-token'); },
+    reload: function() { return Promise.resolve(); }
+  };
+  window.DEMO_USER = DEMO_USER;
+
+  // ===== Override Firebase =====
+  // Wait for firebase to load, then override
+  var _origFirebase = null;
+
+  function overrideFirebase() {
+    if (typeof firebase === 'undefined') {
+      setTimeout(overrideFirebase, 50);
+      return;
+    }
+
+    _origFirebase = {
+      firestore: firebase.firestore,
+      auth: firebase.auth
+    };
+
+    // Override firestore()
+    var demoDb = {
+      collection: function(name) { return makeCollRef(name); },
+      doc: function(path) { return makeDocRef(path); },
+      batch: function() { return makeBatch(); },
+      runTransaction: function(fn) {
+        var t = {
+          get: function(ref) { return ref.get(); },
+          set: function(ref, data, opts) { return ref.set(data, opts); },
+          update: function(ref, data) { return ref.update(data); },
+          delete: function(ref) { return ref.delete(); }
+        };
+        return fn(t);
+      }
+    };
+
+    firebase.firestore = function() { return demoDb; };
+    firebase.firestore.FieldValue = {
+      serverTimestamp: function() { return new Date().toISOString(); },
+      arrayUnion: function() { return { _type: 'arrayUnion', values: Array.from(arguments) }; },
+      arrayRemove: function() { return { _type: 'arrayRemove', values: Array.from(arguments) }; },
+      increment: function(n) { return { _type: 'increment', value: n }; },
+      delete: function() { return { _type: 'delete' }; }
+    };
+    firebase.firestore.Timestamp = {
+      now: function() { return { toDate: function() { return new Date(); }, seconds: Math.floor(Date.now()/1000) }; },
+      fromDate: function(d) { return { toDate: function() { return d; }, seconds: Math.floor(d.getTime()/1000) }; }
+    };
+
+    // Override auth()
+    var authListeners = [];
+    var currentUser = DEMO_USER;
+
+    firebase.auth = function() {
+      return {
+        currentUser: currentUser,
+        onAuthStateChanged: function(cb) {
+          authListeners.push(cb);
+          setTimeout(function() { cb(currentUser); }, 10);
+          return function() { authListeners = authListeners.filter(function(fn) { return fn !== cb; }); };
+        },
+        signInWithPopup: function() { return Promise.resolve({ user: currentUser }); },
+        signInAnonymously: function() {
+          currentUser = Object.assign({}, DEMO_USER, { isAnonymous: true, displayName: 'Guest User' });
+          return Promise.resolve({ user: currentUser });
+        },
+        signInWithEmailAndPassword: function() { return Promise.resolve({ user: currentUser }); },
+        signOut: function() {
+          localStorage.removeItem('app_demo_mode');
+          window.location.search = '';
+          return Promise.resolve();
+        },
+        GoogleAuthProvider: function() { return {}; }
+      };
+    };
+    firebase.auth.GoogleAuthProvider = function() { return {}; };
+    firebase.auth.GoogleAuthProvider.PROVIDER_ID = 'google.com';
+
+    Object.defineProperty(firebase, 'apps', { get: function() { return [{ name: '[DEFAULT]', options: {} }]; }, configurable: true });
+    console.log('[Demo Mode] Firebase overridden with local database');
+  }
+
+  overrideFirebase();
+
+  // ===== Demo Mode Banner =====
+  window.addEventListener('DOMContentLoaded', function() {
+    var banner = document.createElement('div');
+    banner.id = 'demo-mode-banner';
+    banner.innerHTML = '<span style="margin-right:12px">\u26a1 Demo Mode</span><span style="opacity:0.7;margin-right:12px">Data is stored locally in your browser</span><button id="demo-exit-btn" style="background:rgba(255,255,255,0.2);border:1px solid rgba(255,255,255,0.3);color:inherit;padding:2px 12px;border-radius:4px;cursor:pointer;font-size:12px">Exit Demo</button><button id="demo-reset-btn" style="background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);color:inherit;padding:2px 12px;border-radius:4px;cursor:pointer;font-size:12px;margin-left:6px">Reset Data</button>';
+    banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:linear-gradient(90deg,#10069f,#1297e4);color:white;padding:6px 16px;font-size:13px;font-family:system-ui,sans-serif;display:flex;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,0.2);';
+    document.body.appendChild(banner);
+    // Push page content down
+    document.body.style.paddingTop = (banner.offsetHeight) + 'px';
+
+    document.getElementById('demo-exit-btn').onclick = function() {
+      localStorage.removeItem('app_demo_mode');
+      // Clear demo data
+      Object.keys(localStorage).forEach(function(k) { if (k.startsWith('demo_db_')) localStorage.removeItem(k); });
+      window.location.href = window.location.pathname;
+    };
+    document.getElementById('demo-reset-btn').onclick = function() {
+      Object.keys(localStorage).forEach(function(k) { if (k.startsWith('demo_db_')) localStorage.removeItem(k); });
+      window.location.reload();
+    };
+  });
+})();
+</script>
 <style>
 /* ══════════════════════════════════════════════
    THEME SYSTEM — matches BSI portal apps
@@ -266,8 +634,14 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
 <div id="main" class="ml-56 transition-all h-screen flex flex-col">
   <!-- Header -->
   <header class="sticky top-0 z-30 bg-zinc-900/80 border-b border-zinc-800 px-4 py-2 flex items-center justify-between" style="backdrop-filter:blur(8px)">
-    <!-- Left: Map name -->
+    <!-- Left: Project selector + Map name -->
     <div class="flex items-center gap-3">
+      <div id="project-selector-wrapper" class="hidden">
+        <select id="project-selector" onchange="onProjectChange(this.value)" class="bg-zinc-800 text-zinc-100 text-xs font-mono border border-zinc-700 rounded-lg px-2 py-1.5 outline-none focus:border-amber-500 cursor-pointer" style="max-width:160px;">
+          <option value="">No Project</option>
+        </select>
+      </div>
+      <div class="w-px h-5 bg-zinc-700 hidden" id="project-divider"></div>
       <h2 id="header-map-name" class="font-mono font-bold text-zinc-100 text-sm truncate max-w-[200px]">—</h2>
     </div>
     <!-- Center: Layout + Zoom -->
@@ -427,8 +801,26 @@ const state = {
   connectingFrom: null,
   connectingMouse: null,
   spaceDown: false,
-  sidebarOpen: true
+  sidebarOpen: true,
+  // Project / Firebase state
+  currentUser: null,
+  projects: [],
+  activeProjectId: null
 };
+
+// ==================== FIREBASE INIT ====================
+let _firebaseInitialized = false;
+let db = null;
+let _firestoreUnsubscribe = null;
+let _firestoreSaveTimer = null;
+
+function initFirebaseIfNeeded(config) {
+  if (_firebaseInitialized || !config || !config.apiKey) return;
+  firebase.initializeApp(config);
+  db = firebase.firestore();
+  _firebaseInitialized = true;
+  console.log('[MindForge] Firebase initialized');
+}
 
 // ==================== HELPERS ====================
 function uid() { return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 6); }
@@ -437,15 +829,72 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // ==================== PERSISTENCE ====================
 function saveAll() {
+  // Always save to localStorage as backup
   localStorage.setItem(DB_PREFIX + 'maps', JSON.stringify(state.maps));
   localStorage.setItem(DB_PREFIX + 'active', state.activeMapId || '');
+
+  // When logged in AND activeProjectId is set, also write to Firestore (debounced)
+  if (db && state.activeProjectId) {
+    if (_firestoreSaveTimer) clearTimeout(_firestoreSaveTimer);
+    _firestoreSaveTimer = setTimeout(() => {
+      const docRef = db.collection('projects').doc(state.activeProjectId)
+        .collection('mindforge').doc('state');
+      docRef.set({
+        maps: JSON.parse(JSON.stringify(state.maps)),
+        activeMapId: state.activeMapId || '',
+        updatedAt: Date.now()
+      }).then(() => {
+        console.log('[MindForge] Saved to Firestore');
+      }).catch(err => {
+        console.warn('[MindForge] Firestore save error:', err);
+      });
+    }, 500);
+  }
 }
+
 function loadAll() {
+  // Try localStorage first as default/fallback
   const raw = localStorage.getItem(DB_PREFIX + 'maps');
   if (raw) {
     try { state.maps = JSON.parse(raw); } catch(e) { state.maps = []; }
   }
   state.activeMapId = localStorage.getItem(DB_PREFIX + 'active') || (state.maps[0]?.id || null);
+}
+
+function loadFromFirestore() {
+  if (!db || !state.activeProjectId) return;
+
+  // Unsubscribe previous listener if any
+  if (_firestoreUnsubscribe) {
+    _firestoreUnsubscribe();
+    _firestoreUnsubscribe = null;
+  }
+
+  const docRef = db.collection('projects').doc(state.activeProjectId)
+    .collection('mindforge').doc('state');
+
+  // Set up real-time listener
+  _firestoreUnsubscribe = docRef.onSnapshot(snap => {
+    if (snap.exists) {
+      const data = snap.data();
+      if (data && data.maps) {
+        state.maps = data.maps;
+        state.activeMapId = data.activeMapId || (state.maps[0]?.id || null);
+        // Also update localStorage backup
+        localStorage.setItem(DB_PREFIX + 'maps', JSON.stringify(state.maps));
+        localStorage.setItem(DB_PREFIX + 'active', state.activeMapId || '');
+        renderSidebar();
+        renderCanvas();
+        console.log('[MindForge] Loaded from Firestore (real-time)');
+      }
+    } else {
+      // No Firestore data yet — use localStorage data and seed if needed
+      console.log('[MindForge] No Firestore data for project, using localStorage');
+      if (!state.maps.length) seedDemoData();
+    }
+  }, err => {
+    console.warn('[MindForge] Firestore onSnapshot error:', err);
+  });
 }
 
 // ==================== THEME ====================
@@ -1205,9 +1654,61 @@ function seedDemoData() {
     ]
   };
 
-  state.maps = [map1, map2];
+  // Map 3: Interceptor Drone — Design Brainstorm (demo project seed)
+  const map3 = {
+    id: 'demo_brainstorm', name: 'Interceptor Drone — Design Brainstorm',
+    description: 'High-level brainstorm of interceptor drone subsystems',
+    nodes: [
+      { id: 'b1', title: 'Interceptor Drone', type: 'Generic', position:{x:400,y:50}, size:{w:220,h:80}, priority:'Critical', status:'Active', owner:'Systems Engineering', description:'Central concept for interceptor drone design', linkedApp:null, linkedId:null, color:null },
+      { id: 'b2', title: 'Detection', type: 'Function', position:{x:50,y:250}, size:{w:180,h:72}, priority:'High', status:'Active', owner:'Sensor Team', description:'Detect and identify incoming UAS threats using radar, RF, and EO/IR sensors', linkedApp:null, linkedId:null, color:null },
+      { id: 'b3', title: 'Classification', type: 'Function', position:{x:280,y:250}, size:{w:180,h:72}, priority:'High', status:'Active', owner:'AI/ML Team', description:'Classify detected targets by type, size, and threat level using AI/ML algorithms', linkedApp:null, linkedId:null, color:null },
+      { id: 'b4', title: 'Pursuit', type: 'Function', position:{x:510,y:250}, size:{w:180,h:72}, priority:'Critical', status:'Active', owner:'GNC Team', description:'Autonomous pursuit and intercept trajectory planning', linkedApp:null, linkedId:null, color:null },
+      { id: 'b5', title: 'Neutralization', type: 'Function', position:{x:740,y:250}, size:{w:180,h:72}, priority:'Critical', status:'Active', owner:'Payload Team', description:'Kinetic or net-based neutralization of target UAS', linkedApp:null, linkedId:null, color:null },
+      { id: 'b6', title: 'C2 Datalink', type: 'Component', position:{x:200,y:450}, size:{w:180,h:72}, priority:'Critical', status:'Active', owner:'Comms Team', description:'Encrypted command and control datalink for real-time operator control', linkedApp:null, linkedId:null, color:null },
+      { id: 'b7', title: 'GCS', type: 'Component', position:{x:550,y:450}, size:{w:180,h:72}, priority:'Medium', status:'Active', owner:'GCS Team', description:'Ground Control Station for mission planning and monitoring', linkedApp:null, linkedId:null, color:null },
+    ],
+    connections: [
+      { id:'bc1', fromNodeId:'b1', toNodeId:'b2', type:'decomposes into' },
+      { id:'bc2', fromNodeId:'b1', toNodeId:'b3', type:'decomposes into' },
+      { id:'bc3', fromNodeId:'b1', toNodeId:'b4', type:'decomposes into' },
+      { id:'bc4', fromNodeId:'b1', toNodeId:'b5', type:'decomposes into' },
+      { id:'bc5', fromNodeId:'b1', toNodeId:'b6', type:'decomposes into' },
+      { id:'bc6', fromNodeId:'b1', toNodeId:'b7', type:'decomposes into' },
+      { id:'bc7', fromNodeId:'b2', toNodeId:'b3', type:'decomposes into' },
+      { id:'bc8', fromNodeId:'b3', toNodeId:'b4', type:'decomposes into' },
+      { id:'bc9', fromNodeId:'b4', toNodeId:'b5', type:'decomposes into' },
+      { id:'bc10', fromNodeId:'b6', toNodeId:'b7', type:'decomposes into' },
+    ],
+    groups: [
+      { id:'bg1', title:'Kill Chain', nodeIds:['b2','b3','b4','b5'], color:'#ef4444' },
+      { id:'bg2', title:'Command & Control', nodeIds:['b6','b7'], color:'#8b5cf6' },
+    ]
+  };
+
+  state.maps = [map1, map2, map3];
   state.activeMapId = map1.id;
   saveAll();
+}
+
+function seedDemoProject() {
+  // Read projects from registry (seeded by ERP), fallback to default
+  const regRaw = localStorage.getItem('demo_db_projects');
+  if (regRaw) {
+    const reg = JSON.parse(regRaw);
+    state.projects = Object.keys(reg).map(k => ({ id: reg[k].id || k, name: reg[k].name }));
+  }
+  if (!state.projects || !state.projects.length) {
+    state.projects = [{ id: 'demo_proj_001', name: 'CNC Milling Machine Retrofit' }];
+  }
+  state.activeProjectId = state.projects[0].id;
+  localStorage.setItem('mindforge_activeProject', state.activeProjectId);
+  state.currentUser = {
+    uid: 'demo-user-001',
+    email: 'demo@blacksphereindustries.nl',
+    displayName: 'Demo User',
+    photoURL: null
+  };
+  renderProjectSelector();
 }
 
 // ==================== EVENT HANDLERS ====================
@@ -1385,14 +1886,80 @@ function renderDragConnection() {
     `<path d="M${fx},${fy} C${fx + dx*0.4},${fy} ${tx - dx*0.4},${ty} ${tx},${ty}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6,3" fill="none" opacity="0.6"/>`;
 }
 
+// ==================== PROJECT SELECTOR ====================
+function renderProjectSelector() {
+  const wrapper = document.getElementById('project-selector-wrapper');
+  const divider = document.getElementById('project-divider');
+  const select = document.getElementById('project-selector');
+  if (!state.projects || !state.projects.length) {
+    wrapper.classList.add('hidden');
+    divider.classList.add('hidden');
+    return;
+  }
+  wrapper.classList.remove('hidden');
+  divider.classList.remove('hidden');
+  select.innerHTML = state.projects.map(p =>
+    `<option value="${p.id}" ${p.id === state.activeProjectId ? 'selected' : ''}>${escHtml(p.name || p.id)}</option>`
+  ).join('');
+}
+
+function onProjectChange(projectId) {
+  if (!projectId || projectId === state.activeProjectId) return;
+  // Save current maps to current project before switching
+  saveAll();
+  // Switch project
+  state.activeProjectId = projectId;
+  localStorage.setItem('mindforge_activeProject', projectId);
+  // Reset maps and load from new project
+  state.maps = [];
+  state.activeMapId = null;
+  loadAll();
+  loadFromFirestore();
+  renderSidebar();
+  renderCanvas();
+  toast('Switched to project: ' + (state.projects.find(p => p.id === projectId)?.name || projectId), 'info');
+}
+
 // ==================== SSO LISTENER ====================
 window.addEventListener('message', e => {
-  if (e.data?.type === 'admin-auth' && e.data.sso) {
-    const u = e.data.sso;
-    document.getElementById('user-info').innerHTML = `
-      ${u.photoURL ? `<img src="${u.photoURL}" style="width:24px;height:24px;border-radius:50%;border:1px solid rgba(245,158,11,0.5);" referrerpolicy="no-referrer">` : `<div class="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-[10px] font-bold text-black">${(u.displayName||u.email||'?')[0].toUpperCase()}</div>`}
-      <span class="font-mono text-[10px] text-zinc-400">${u.displayName || u.email}</span>
-    `;
+  if (e.data?.type === 'admin-auth') {
+    // Extract Firebase config
+    if (e.data.firebaseConfig) {
+      initFirebaseIfNeeded(e.data.firebaseConfig);
+    }
+    // Set current user from SSO data
+    if (e.data.sso) {
+      const u = e.data.sso;
+      state.currentUser = u;
+      document.getElementById('user-info').innerHTML = `
+        ${u.photoURL ? `<img src="${u.photoURL}" style="width:24px;height:24px;border-radius:50%;border:1px solid rgba(245,158,11,0.5);" referrerpolicy="no-referrer">` : `<div class="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-[10px] font-bold text-black">${(u.displayName||u.email||'?')[0].toUpperCase()}</div>`}
+        <span class="font-mono text-[10px] text-zinc-400">${u.displayName || u.email}</span>
+      `;
+    }
+    // Set projects from message
+    if (e.data.projects) {
+      state.projects = e.data.projects;
+      state.activeProjectId = localStorage.getItem('mindforge_activeProject')
+        || (state.projects[0]?.id || null);
+      if (state.activeProjectId) {
+        localStorage.setItem('mindforge_activeProject', state.activeProjectId);
+      }
+      renderProjectSelector();
+      // Load project-specific maps from Firestore
+      loadFromFirestore();
+    }
+  }
+  // Portal selected a project
+  if (e.data?.type === 'active-project' && e.data.projectId) {
+    state.activeProjectId = e.data.projectId;
+    localStorage.setItem('mindforge_activeProject', e.data.projectId);
+    renderProjectSelector();
+    loadFromFirestore();
+  }
+  // Listen for project registry updates
+  if (e.data?.type === 'projects-registry') {
+    state.projects = e.data.projects || [];
+    renderProjectSelector();
   }
   // Theme sync handled by BSI Theme Bridge v1.1 in <head>
 });
@@ -1409,8 +1976,22 @@ function init() {
   loadAll();
   if (!state.maps.length) seedDemoData();
   if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
+  // In demo mode, set up demo project and Firebase shim
+  if (DEMO_MODE || window.DEMO_MODE) {
+    seedDemoProject();
+    // Initialize Firebase (will use the shim in demo mode)
+    if (typeof firebase !== 'undefined') {
+      initFirebaseIfNeeded({ apiKey: 'demo', projectId: 'demo' });
+    }
+  }
+  // Restore active project from localStorage if available
+  const savedProject = localStorage.getItem('mindforge_activeProject');
+  if (savedProject && !state.activeProjectId) {
+    state.activeProjectId = savedProject;
+  }
   setupEvents();
   renderSidebar();
+  renderProjectSelector();
   renderCanvas();
   setTimeout(fitToScreen, 200);
 }
