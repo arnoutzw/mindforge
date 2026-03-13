@@ -544,6 +544,12 @@ function _loadFromFirestore(projectId) {
       state.maps = d.maps || [];
       state.activeMapId = d.activeMapId || (state.maps[0]?.id || null);
       _lastFirestoreUpdate = d.updatedAt || 0;
+      // Persist Firestore data to localStorage so next load starts with fresh data
+      const pfx = getDbPrefix();
+      try {
+        localStorage.setItem(pfx + 'maps', JSON.stringify(state.maps));
+        localStorage.setItem(pfx + 'active', state.activeMapId || '');
+      } catch(e) {}
       console.log('[mindforge] Loaded from Firestore:', state.maps.length, 'maps');
     } else {
       console.log('[mindforge] No Firestore data for project', projectId);
@@ -1649,15 +1655,61 @@ window.addEventListener('message', e => {
         name: sso.name || sso.displayName || sso.email,
         role: sso.role || 'viewer',
       };
-      // Sign in with custom token if provided
-      if (sso.customToken && _firestoreDb) {
-        firebase.auth().signInWithCustomToken(sso.customToken)
-          .then(() => {
-            console.log('[mindforge] SSO sign-in OK');
-            // Reload from Firestore now that we're authed
-            if (_currentProjectId) _loadFromFirestore(_currentProjectId);
-          })
-          .catch(err => console.warn('[mindforge] SSO sign-in failed', err));
+      // Authenticate with Firebase and load Firestore data
+      if (_firestoreDb) {
+        const auth = firebase.auth();
+        const _authTimeout = (p, ms) => Promise.race([p, new Promise((_, r) => setTimeout(() => r(new Error('timeout ' + ms + 'ms')), ms))]);
+        (async () => {
+          let firebaseAuthOk = false;
+          try {
+            // 0. Reuse existing session if already signed in with same UID
+            if (auth.currentUser && auth.currentUser.uid === (sso.uid || sso.id)) {
+              firebaseAuthOk = true;
+              console.log('[mindforge] Reusing existing Firebase session');
+            }
+            // 1. Try Google OAuth ID token
+            if (!firebaseAuthOk && sso.idToken) {
+              try {
+                const credential = firebase.auth.GoogleAuthProvider.credential(sso.idToken);
+                await _authTimeout(auth.signInWithCredential(credential), 8000);
+                firebaseAuthOk = true;
+                console.log('[mindforge] Google credential auth OK');
+              } catch (err) {
+                console.warn('[mindforge] Google credential auth failed:', err.code || err.message);
+              }
+            }
+            // 2. Fallback: custom token via Cloud Function
+            if (!firebaseAuthOk && sso.firebaseIdToken) {
+              try {
+                const fn = firebase.functions().httpsCallable('mintCustomToken');
+                const result = await _authTimeout(fn({ idToken: sso.firebaseIdToken }), 8000);
+                await _authTimeout(auth.signInWithCustomToken(result.data.customToken), 8000);
+                firebaseAuthOk = true;
+                console.log('[mindforge] Custom token auth OK');
+              } catch (err) {
+                console.warn('[mindforge] Custom token auth failed:', err.code || err.message);
+              }
+            }
+            // 3. Legacy: direct custom token
+            if (!firebaseAuthOk && sso.customToken) {
+              try {
+                await _authTimeout(auth.signInWithCustomToken(sso.customToken), 8000);
+                firebaseAuthOk = true;
+                console.log('[mindforge] SSO sign-in OK');
+              } catch (err) {
+                console.warn('[mindforge] SSO sign-in failed:', err.code || err.message);
+              }
+            }
+          } catch (e) {
+            console.warn('[mindforge] Auth error:', e);
+          }
+          // Load from Firestore regardless — read-only may work with relaxed rules
+          if (_currentProjectId) {
+            _loadFromFirestore(_currentProjectId);
+            if (firebaseAuthOk) console.log('[mindforge] Loading Firestore (authenticated)');
+            else console.log('[mindforge] Loading Firestore (unauthenticated fallback)');
+          }
+        })();
       }
       const u = sso;
       document.getElementById('user-info').innerHTML = `
