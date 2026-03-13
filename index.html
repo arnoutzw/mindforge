@@ -413,6 +413,10 @@ let _currentUser = null;
 let _firestoreUnsub = null;
 let _firestoreSaveTimer = null;
 let _lastFirestoreUpdate = 0;
+let _firestoreLoaded = false;    // true once initial Firestore .get() resolves
+let _editingNodeId = null;       // set while edit modal is open
+let _pendingRemoteSync = null;   // stashed remote data during edit
+let _savePaused = false;         // suppress onSnapshot echo during saves
 const PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
 const STATUSES = ['Active', 'Completed', 'Blocked', 'On Hold'];
 
@@ -472,6 +476,7 @@ function saveAll() {
   // Save to Firestore when available (debounced)
   if (_firestoreDb && _currentUser && _currentProjectId) {
     clearTimeout(_firestoreSaveTimer);
+    _savePaused = true;
     const pid = _currentProjectId;
     _firestoreSaveTimer = setTimeout(() => {
       const data = {
@@ -481,9 +486,10 @@ function saveAll() {
       };
       _firestoreDb.collection('projects').doc(pid)
         .collection('mindforge').doc('state')
-        .set(data, { merge: false })
+        .set(data, { merge: true })
         .then(() => console.log('[mindforge] Saved to Firestore for', pid))
-        .catch(err => console.warn('[mindforge] Firestore save failed', err));
+        .catch(err => console.warn('[mindforge] Firestore save failed', err))
+        .finally(() => { setTimeout(() => { _savePaused = false; }, 500); });
     }, 500);
   }
 }
@@ -498,7 +504,7 @@ function _saveToProjectImmediate(pid, maps, activeMapId) {
   };
   _firestoreDb.collection('projects').doc(pid)
     .collection('mindforge').doc('state')
-    .set(data, { merge: false })
+    .set(data, { merge: true })
     .then(() => console.log('[mindforge] Saved to Firestore for', pid))
     .catch(err => console.warn('[mindforge] Firestore save failed', err));
 }
@@ -532,6 +538,7 @@ function _loadFromFirestore(projectId) {
 
   // Initial load
   docRef.get().then(snap => {
+    _firestoreLoaded = true;
     if (snap.exists) {
       const d = snap.data();
       state.maps = d.maps || [];
@@ -546,6 +553,7 @@ function _loadFromFirestore(projectId) {
     renderSidebar();
     renderCanvas();
   }).catch(err => {
+    _firestoreLoaded = true;
     console.warn('[mindforge] Firestore load failed, using localStorage', err);
   });
 
@@ -553,10 +561,17 @@ function _loadFromFirestore(projectId) {
   _firestoreUnsub = docRef.onSnapshot(snap => {
     if (!snap.exists) return;
     if (snap.metadata.hasPendingWrites) return;
+    if (_savePaused) return; // suppress echo from our own save
     const d = snap.data();
     const remoteUpdatedAt = d.updatedAt || 0;
     if (remoteUpdatedAt > _lastFirestoreUpdate) {
       _lastFirestoreUpdate = remoteUpdatedAt;
+      if (_editingNodeId) {
+        // Stash remote data; apply when modal closes
+        _pendingRemoteSync = d;
+        console.log('[mindforge] Deferred remote sync (edit in progress)');
+        return;
+      }
       state.maps = d.maps || [];
       state.activeMapId = d.activeMapId || (state.maps[0]?.id || null);
       renderSidebar();
@@ -1134,9 +1149,28 @@ function showModal(html) {
   modal.className = '';
   modal.innerHTML = `<div class="modal-overlay" onclick="if(event.target===this)hideModal()"><div class="modal-box">${html}</div></div>`;
 }
-function hideModal() { document.getElementById('modal').className = 'hidden'; document.getElementById('modal').innerHTML = ''; }
+function hideModal() {
+  _editingNodeId = null;
+  document.getElementById('modal').className = 'hidden';
+  document.getElementById('modal').innerHTML = '';
+  // Apply any deferred remote sync
+  if (_pendingRemoteSync) {
+    const d = _pendingRemoteSync;
+    _pendingRemoteSync = null;
+    const remoteTs = d.updatedAt || 0;
+    if (remoteTs > _lastFirestoreUpdate) {
+      _lastFirestoreUpdate = remoteTs;
+      state.maps = d.maps || [];
+      state.activeMapId = d.activeMapId || (state.maps[0]?.id || null);
+      renderSidebar();
+      renderCanvas();
+      console.log('[mindforge] Applied deferred remote sync');
+    }
+  }
+}
 
 function showEditModal(nodeId) {
+  _editingNodeId = nodeId;
   const map = getMap();
   if (!map) return;
   const node = map.nodes.find(n => n.id === nodeId);
@@ -1255,6 +1289,12 @@ function handleImport(e) {
 
 // ==================== DEMO SEED DATA ====================
 function seedDemoData() {
+  // Idempotency guards — prevent re-seeding over MCP or user-created maps
+  if (_currentProjectId && _currentProjectId !== 'demo_proj_000') return;
+  if (state.maps.length > 0) return;
+  const seedKey = 'mindforge_seeded_' + (_currentProjectId || 'default');
+  if (localStorage.getItem(seedKey)) return;
+
   // Map 1: Interceptor Drone System Decomposition
   const map1 = {
     id: 'demo_sys_decomp', name: 'Interceptor Drone — System Decomposition',
@@ -1367,6 +1407,7 @@ function seedDemoData() {
 
   state.maps = [map1, map2];
   state.activeMapId = map1.id;
+  localStorage.setItem(seedKey, '1');
   saveAll();
 }
 
@@ -1565,11 +1606,17 @@ window.addEventListener('message', e => {
         // Save to Firestore with captured old project ID
         _saveToProjectImmediate(prevProject, state.maps, state.activeMapId);
       }
+      // Cancel any pending debounced save for the OLD project
+      clearTimeout(_firestoreSaveTimer);
+      _firestoreSaveTimer = null;
+      _savePaused = false;
       _currentProjectId = data.projectId;
       try { localStorage.setItem('mindforge_active_project', data.projectId); } catch(e) {}
       // Unsubscribe old listener
       if (_firestoreUnsub) { _firestoreUnsub(); _firestoreUnsub = null; }
       // Clear state
+      _firestoreLoaded = false;
+      _pendingRemoteSync = null;
       state.maps = [];
       state.activeMapId = null;
       state.selectedNodeId = null;
