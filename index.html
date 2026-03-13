@@ -473,6 +473,27 @@ function _migrateToProject() {
   console.log('[mindforge] Migrated legacy data to demo_proj_000');
 }
 
+// One-time cleanup: remove wrongly-seeded interceptor drone data from non-interceptor projects
+function _cleanupWrongSeeds() {
+  if (localStorage.getItem('mindforge_seed_cleanup_v1')) return;
+  const demoIds = ['demo_sys_decomp', 'demo_fmea'];
+  ['demo_proj_001', 'demo_proj_002'].forEach(pid => {
+    const key = DB_PREFIX_BASE + pid + '_maps';
+    const raw = localStorage.getItem(key);
+    if (!raw) return;
+    try {
+      const maps = JSON.parse(raw);
+      // If all maps are demo seed maps, clear them
+      if (maps.length > 0 && maps.every(m => demoIds.includes(m.id))) {
+        localStorage.removeItem(key);
+        localStorage.removeItem(DB_PREFIX_BASE + pid + '_active');
+        console.log('[mindforge] Cleaned wrongly-seeded data from', pid);
+      }
+    } catch(e) {}
+  });
+  localStorage.setItem('mindforge_seed_cleanup_v1', '1');
+}
+
 // ==================== THEME ====================
 function updateThemeIcon(t) {
   const el = document.getElementById('theme-icon');
@@ -1465,10 +1486,12 @@ function init() {
   }
   // Migrate legacy non-project-scoped data to demo_proj_000
   _migrateToProject();
+  _cleanupWrongSeeds();
   // Restore last active project
   try { _currentProjectId = localStorage.getItem('mindforge_active_project') || null; } catch(e) {}
   loadAll();
-  if (!state.maps.length) seedDemoData();
+  // Only seed demo data for the interceptor drone project, not every empty project
+  if (!state.maps.length && _currentProjectId === 'demo_proj_000') seedDemoData();
   if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
   setupEvents();
   renderSidebar();
