@@ -8,6 +8,9 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <style>
 /* ══════════════════════════════════════════════
    THEME SYSTEM — matches BSI portal apps
@@ -404,8 +407,24 @@ const DEFAULT_NODE_H = 72;
 const DB_PREFIX_BASE = 'demo_db_mindforge_';
 let _currentProjectId = null; // Set by active-project postMessage
 let _projects = []; // From projects-registry postMessage
+let _firebaseInitialized = false;
+let _firestoreDb = null;
+let _currentUser = null;
+let _firestoreUnsub = null;
+let _firestoreSaveTimer = null;
+let _lastFirestoreUpdate = 0;
 const PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
 const STATUSES = ['Active', 'Completed', 'Blocked', 'On Hold'];
+
+function _initFirebase(config) {
+  if (_firebaseInitialized || !config || !config.apiKey) return;
+  try {
+    firebase.initializeApp(config);
+    _firestoreDb = firebase.firestore();
+    _firebaseInitialized = true;
+    console.log('[mindforge] Firebase initialized');
+  } catch(e) { console.warn('[mindforge] Firebase init failed', e); }
+}
 
 function getDbPrefix() {
   return _currentProjectId ? DB_PREFIX_BASE + _currentProjectId + '_' : DB_PREFIX_BASE;
@@ -444,11 +463,49 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 // ==================== PERSISTENCE ====================
 function saveAll() {
   const pfx = getDbPrefix();
-  localStorage.setItem(pfx + 'maps', JSON.stringify(state.maps));
-  localStorage.setItem(pfx + 'active', state.activeMapId || '');
+  // Always save to localStorage as backup
+  try {
+    localStorage.setItem(pfx + 'maps', JSON.stringify(state.maps));
+    localStorage.setItem(pfx + 'active', state.activeMapId || '');
+  } catch(e) {}
+
+  // Save to Firestore when available (debounced)
+  if (_firestoreDb && _currentUser && _currentProjectId) {
+    clearTimeout(_firestoreSaveTimer);
+    const pid = _currentProjectId;
+    _firestoreSaveTimer = setTimeout(() => {
+      const data = {
+        maps: JSON.parse(JSON.stringify(state.maps)),
+        activeMapId: state.activeMapId || null,
+        updatedAt: Date.now(),
+      };
+      _firestoreDb.collection('projects').doc(pid)
+        .collection('mindforge').doc('state')
+        .set(data, { merge: false })
+        .then(() => console.log('[mindforge] Saved to Firestore for', pid))
+        .catch(err => console.warn('[mindforge] Firestore save failed', err));
+    }, 500);
+  }
 }
+
+function _saveToProjectImmediate(pid, maps, activeMapId) {
+  // Immediate save for project switches — captures data before state changes
+  if (!_firestoreDb || !_currentUser || !pid) return;
+  const data = {
+    maps: JSON.parse(JSON.stringify(maps)),
+    activeMapId: activeMapId || null,
+    updatedAt: Date.now(),
+  };
+  _firestoreDb.collection('projects').doc(pid)
+    .collection('mindforge').doc('state')
+    .set(data, { merge: false })
+    .then(() => console.log('[mindforge] Saved to Firestore for', pid))
+    .catch(err => console.warn('[mindforge] Firestore save failed', err));
+}
+
 function loadAll() {
   const pfx = getDbPrefix();
+  // Load from localStorage first (instant)
   const raw = localStorage.getItem(pfx + 'maps');
   if (raw) {
     try { state.maps = JSON.parse(raw); } catch(e) { state.maps = []; }
@@ -456,6 +513,53 @@ function loadAll() {
     state.maps = [];
   }
   state.activeMapId = localStorage.getItem(pfx + 'active') || (state.maps[0]?.id || null);
+
+  // Then load from Firestore if available (async, overrides localStorage)
+  if (_firestoreDb && _currentUser && _currentProjectId) {
+    _loadFromFirestore(_currentProjectId);
+  }
+}
+
+function _loadFromFirestore(projectId) {
+  // Unsubscribe previous listener
+  if (_firestoreUnsub) { _firestoreUnsub(); _firestoreUnsub = null; }
+
+  const docRef = _firestoreDb.collection('projects').doc(projectId)
+    .collection('mindforge').doc('state');
+
+  // Initial load
+  docRef.get().then(snap => {
+    if (snap.exists) {
+      const d = snap.data();
+      state.maps = d.maps || [];
+      state.activeMapId = d.activeMapId || (state.maps[0]?.id || null);
+      _lastFirestoreUpdate = d.updatedAt || 0;
+      console.log('[mindforge] Loaded from Firestore:', state.maps.length, 'maps');
+    } else {
+      console.log('[mindforge] No Firestore data for project', projectId);
+      // Keep whatever was loaded from localStorage (or empty)
+    }
+    renderSidebar();
+    renderCanvas();
+  }).catch(err => {
+    console.warn('[mindforge] Firestore load failed, using localStorage', err);
+  });
+
+  // Real-time listener for remote changes
+  _firestoreUnsub = docRef.onSnapshot(snap => {
+    if (!snap.exists) return;
+    if (snap.metadata.hasPendingWrites) return;
+    const d = snap.data();
+    const remoteUpdatedAt = d.updatedAt || 0;
+    if (remoteUpdatedAt > _lastFirestoreUpdate) {
+      _lastFirestoreUpdate = remoteUpdatedAt;
+      state.maps = d.maps || [];
+      state.activeMapId = d.activeMapId || (state.maps[0]?.id || null);
+      renderSidebar();
+      renderCanvas();
+      console.log('[mindforge] Synced from Firestore');
+    }
+  }, err => console.warn('[mindforge] onSnapshot error', err));
 }
 
 // Migrate legacy data (no project prefix) to Interceptor Drone project
@@ -1439,15 +1543,28 @@ window.addEventListener('message', e => {
   // ── Active project switch ──
   if (data.type === 'active-project' && data.projectId) {
     const prevProject = _currentProjectId;
-    _currentProjectId = data.projectId;
-    try { localStorage.setItem('mindforge_active_project', data.projectId); } catch(e) {}
     if (prevProject !== data.projectId) {
-      // Save current project data, then load new project
-      if (prevProject) saveAll();
+      // Save current project data to Firestore BEFORE switching
+      if (prevProject && state.maps.length) {
+        // Save to localStorage with old prefix
+        const oldPfx = DB_PREFIX_BASE + prevProject + '_';
+        try {
+          localStorage.setItem(oldPfx + 'maps', JSON.stringify(state.maps));
+          localStorage.setItem(oldPfx + 'active', state.activeMapId || '');
+        } catch(e) {}
+        // Save to Firestore with captured old project ID
+        _saveToProjectImmediate(prevProject, state.maps, state.activeMapId);
+      }
+      _currentProjectId = data.projectId;
+      try { localStorage.setItem('mindforge_active_project', data.projectId); } catch(e) {}
+      // Unsubscribe old listener
+      if (_firestoreUnsub) { _firestoreUnsub(); _firestoreUnsub = null; }
+      // Clear state
       state.maps = [];
       state.activeMapId = null;
       state.selectedNodeId = null;
       state.zoom = 1; state.panX = 0; state.panY = 0;
+      // Load new project data
       loadAll();
       if (!state.maps.length && data.projectId === 'demo_proj_000') seedDemoData();
       if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
@@ -1465,12 +1582,34 @@ window.addEventListener('message', e => {
   }
 
   // ── SSO auth ──
-  if (data.type === 'admin-auth' && data.sso) {
-    const u = data.sso;
-    document.getElementById('user-info').innerHTML = `
-      ${u.photoURL ? `<img src="${u.photoURL}" style="width:24px;height:24px;border-radius:50%;border:1px solid rgba(245,158,11,0.5);" referrerpolicy="no-referrer">` : `<div class="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-[10px] font-bold text-black">${(u.displayName||u.email||'?')[0].toUpperCase()}</div>`}
-      <span class="font-mono text-[10px] text-zinc-400">${u.displayName || u.email}</span>
-    `;
+  if (data.type === 'admin-auth') {
+    const { firebaseConfig, sso, projects } = data;
+    _initFirebase(firebaseConfig);
+    if (sso) {
+      _currentUser = {
+        uid: sso.uid || sso.id,
+        email: sso.email,
+        name: sso.name || sso.displayName || sso.email,
+        role: sso.role || 'viewer',
+      };
+      // Sign in with custom token if provided
+      if (sso.customToken && _firestoreDb) {
+        firebase.auth().signInWithCustomToken(sso.customToken)
+          .then(() => {
+            console.log('[mindforge] SSO sign-in OK');
+            // Reload from Firestore now that we're authed
+            if (_currentProjectId) _loadFromFirestore(_currentProjectId);
+          })
+          .catch(err => console.warn('[mindforge] SSO sign-in failed', err));
+      }
+      const u = sso;
+      document.getElementById('user-info').innerHTML = `
+        ${u.photoURL ? `<img src="${u.photoURL}" style="width:24px;height:24px;border-radius:50%;border:1px solid rgba(245,158,11,0.5);" referrerpolicy="no-referrer">` : `<div class="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-[10px] font-bold text-black">${(u.displayName||u.email||'?')[0].toUpperCase()}</div>`}
+        <span class="font-mono text-[10px] text-zinc-400">${u.displayName || u.email}</span>
+      `;
+    }
+    if (Array.isArray(projects)) _projects = projects;
+    console.log('[mindforge] admin-auth received', { user: _currentUser?.email, projects: _projects.length });
   }
   // Theme sync handled by BSI Theme Bridge v1.1 in <head>
 });
