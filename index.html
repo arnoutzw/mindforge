@@ -401,9 +401,15 @@ const CONN_ARROWS = { 'decomposes into': '#arrow-default', 'causes': '#arrow-red
 const CONN_COLORS = { 'decomposes into': '#71717a', 'causes': '#ef4444', 'verified by': '#8b5cf6', 'mitigates': '#22c55e' };
 const DEFAULT_NODE_W = 200;
 const DEFAULT_NODE_H = 72;
-const DB_PREFIX = 'demo_db_mindforge_';
+const DB_PREFIX_BASE = 'demo_db_mindforge_';
+let _currentProjectId = null; // Set by active-project postMessage
+let _projects = []; // From projects-registry postMessage
 const PRIORITIES = ['Low', 'Medium', 'High', 'Critical'];
 const STATUSES = ['Active', 'Completed', 'Blocked', 'On Hold'];
+
+function getDbPrefix() {
+  return _currentProjectId ? DB_PREFIX_BASE + _currentProjectId + '_' : DB_PREFIX_BASE;
+}
 
 // ==================== STATE ====================
 const params = new URLSearchParams(location.search);
@@ -437,15 +443,34 @@ function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
 // ==================== PERSISTENCE ====================
 function saveAll() {
-  localStorage.setItem(DB_PREFIX + 'maps', JSON.stringify(state.maps));
-  localStorage.setItem(DB_PREFIX + 'active', state.activeMapId || '');
+  const pfx = getDbPrefix();
+  localStorage.setItem(pfx + 'maps', JSON.stringify(state.maps));
+  localStorage.setItem(pfx + 'active', state.activeMapId || '');
 }
 function loadAll() {
-  const raw = localStorage.getItem(DB_PREFIX + 'maps');
+  const pfx = getDbPrefix();
+  const raw = localStorage.getItem(pfx + 'maps');
   if (raw) {
     try { state.maps = JSON.parse(raw); } catch(e) { state.maps = []; }
+  } else {
+    state.maps = [];
   }
-  state.activeMapId = localStorage.getItem(DB_PREFIX + 'active') || (state.maps[0]?.id || null);
+  state.activeMapId = localStorage.getItem(pfx + 'active') || (state.maps[0]?.id || null);
+}
+
+// Migrate legacy data (no project prefix) to Interceptor Drone project
+function _migrateToProject() {
+  const legacyMaps = localStorage.getItem(DB_PREFIX_BASE + 'maps');
+  if (!legacyMaps) return; // Nothing to migrate
+  const targetPfx = DB_PREFIX_BASE + 'demo_proj_000_';
+  if (localStorage.getItem(targetPfx + 'maps')) return; // Already migrated
+  localStorage.setItem(targetPfx + 'maps', legacyMaps);
+  const legacyActive = localStorage.getItem(DB_PREFIX_BASE + 'active');
+  if (legacyActive) localStorage.setItem(targetPfx + 'active', legacyActive);
+  // Clean up legacy keys
+  localStorage.removeItem(DB_PREFIX_BASE + 'maps');
+  localStorage.removeItem(DB_PREFIX_BASE + 'active');
+  console.log('[mindforge] Migrated legacy data to demo_proj_000');
 }
 
 // ==================== THEME ====================
@@ -463,11 +488,11 @@ function toggleTheme() { if (window.bsiToggleTheme) window.bsiToggleTheme(); }
 // ==================== DEMO MODE ====================
 function exitDemo() {
   localStorage.removeItem('mindforge_demo');
-  Object.keys(localStorage).forEach(k => { if (k.startsWith(DB_PREFIX)) localStorage.removeItem(k); });
+  Object.keys(localStorage).forEach(k => { if (k.startsWith(DB_PREFIX_BASE)) localStorage.removeItem(k); });
   location.href = location.pathname;
 }
 function resetDemo() {
-  Object.keys(localStorage).forEach(k => { if (k.startsWith(DB_PREFIX)) localStorage.removeItem(k); });
+  Object.keys(localStorage).forEach(k => { if (k.startsWith(DB_PREFIX_BASE)) localStorage.removeItem(k); });
   location.reload();
 }
 
@@ -1385,10 +1410,42 @@ function renderDragConnection() {
     `<path d="M${fx},${fy} C${fx + dx*0.4},${fy} ${tx - dx*0.4},${ty} ${tx},${ty}" stroke="var(--accent)" stroke-width="2" stroke-dasharray="6,3" fill="none" opacity="0.6"/>`;
 }
 
-// ==================== SSO LISTENER ====================
+// ==================== SSO & PROJECT LISTENERS ====================
 window.addEventListener('message', e => {
-  if (e.data?.type === 'admin-auth' && e.data.sso) {
-    const u = e.data.sso;
+  const data = e.data;
+  if (!data || typeof data !== 'object') return;
+
+  // ── Active project switch ──
+  if (data.type === 'active-project' && data.projectId) {
+    const prevProject = _currentProjectId;
+    _currentProjectId = data.projectId;
+    try { localStorage.setItem('mindforge_active_project', data.projectId); } catch(e) {}
+    if (prevProject !== data.projectId) {
+      // Save current project data, then load new project
+      if (prevProject) saveAll();
+      state.maps = [];
+      state.activeMapId = null;
+      state.selectedNodeId = null;
+      state.zoom = 1; state.panX = 0; state.panY = 0;
+      loadAll();
+      if (!state.maps.length && data.projectId === 'demo_proj_000') seedDemoData();
+      if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
+      renderSidebar();
+      renderCanvas();
+      console.log('[mindforge] Switched to project:', data.projectId);
+    }
+    return;
+  }
+
+  // ── Projects registry ──
+  if (data.type === 'projects-registry' && Array.isArray(data.projects)) {
+    _projects = data.projects;
+    return;
+  }
+
+  // ── SSO auth ──
+  if (data.type === 'admin-auth' && data.sso) {
+    const u = data.sso;
     document.getElementById('user-info').innerHTML = `
       ${u.photoURL ? `<img src="${u.photoURL}" style="width:24px;height:24px;border-radius:50%;border:1px solid rgba(245,158,11,0.5);" referrerpolicy="no-referrer">` : `<div class="w-6 h-6 rounded-full bg-amber-500 flex items-center justify-center text-[10px] font-bold text-black">${(u.displayName||u.email||'?')[0].toUpperCase()}</div>`}
       <span class="font-mono text-[10px] text-zinc-400">${u.displayName || u.email}</span>
@@ -1406,6 +1463,10 @@ function init() {
     document.getElementById('sidebar').style.paddingTop = '36px';
     document.getElementById('main').style.paddingTop = '36px';
   }
+  // Migrate legacy non-project-scoped data to demo_proj_000
+  _migrateToProject();
+  // Restore last active project
+  try { _currentProjectId = localStorage.getItem('mindforge_active_project') || null; } catch(e) {}
   loadAll();
   if (!state.maps.length) seedDemoData();
   if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
