@@ -552,6 +552,15 @@ function _loadFromFirestore(projectId) {
         localStorage.setItem(pfx + 'active', state.activeMapId || '');
       } catch(e) {}
       console.log('[mindforge] Loaded from Firestore:', state.maps.length, 'maps');
+      // Debug: dump map structure
+      state.maps.forEach(m => {
+        const connSample = (m.connections || [])[0];
+        console.log('[mindforge][debug] Map:', m.id, m.name,
+          '| nodes:', (m.nodes||[]).length,
+          '| connections:', (m.connections||[]).length,
+          '| connFields:', connSample ? Object.keys(connSample).join(',') : 'none',
+          '| sample:', connSample ? JSON.stringify(connSample) : 'none');
+      });
     } else {
       console.log('[mindforge] No Firestore data for project', projectId);
       // Seed demo data only when Firestore confirms no data exists
@@ -798,7 +807,10 @@ function bestConnectors(from, to) {
 function renderConnectionSVG(conn, map) {
   const fromNode = map.nodes.find(n => n.id === conn.fromNodeId);
   const toNode = map.nodes.find(n => n.id === conn.toNodeId);
-  if (!fromNode || !toNode) return '';
+  if (!fromNode || !toNode) {
+    console.warn('[mindforge][debug] Connection', conn.id, 'missing node — fromNodeId:', conn.fromNodeId, 'toNodeId:', conn.toNodeId, '| raw keys:', Object.keys(conn).join(','));
+    return '';
+  }
   const pts = bestConnectors(fromNode, toNode);
   const dx = pts.to.x - pts.from.x, dy = pts.to.y - pts.from.y;
   const cx1 = pts.from.x + dx * 0.4, cy1 = pts.from.y;
