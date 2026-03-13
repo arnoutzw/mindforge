@@ -517,6 +517,9 @@ function loadAll() {
   // Then load from Firestore if available (async, overrides localStorage)
   if (_firestoreDb && _currentUser && _currentProjectId) {
     _loadFromFirestore(_currentProjectId);
+  } else {
+    // No Firestore — seed demo data from localStorage context only
+    if (!state.maps.length && _currentProjectId === 'demo_proj_000') seedDemoData();
   }
 }
 
@@ -537,7 +540,8 @@ function _loadFromFirestore(projectId) {
       console.log('[mindforge] Loaded from Firestore:', state.maps.length, 'maps');
     } else {
       console.log('[mindforge] No Firestore data for project', projectId);
-      // Keep whatever was loaded from localStorage (or empty)
+      // Seed demo data only when Firestore confirms no data exists
+      if (!state.maps.length && projectId === 'demo_proj_000') seedDemoData();
     }
     renderSidebar();
     renderCanvas();
@@ -1572,7 +1576,7 @@ window.addEventListener('message', e => {
       state.zoom = 1; state.panX = 0; state.panY = 0;
       // Load new project data
       loadAll();
-      if (!state.maps.length && data.projectId === 'demo_proj_000') seedDemoData();
+      // NOTE: seedDemoData is now called inside _loadFromFirestore callback to avoid race condition
       if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
       renderSidebar();
       renderCanvas();
@@ -1635,8 +1639,7 @@ function init() {
   // Restore last active project
   try { _currentProjectId = localStorage.getItem('mindforge_active_project') || null; } catch(e) {}
   loadAll();
-  // Only seed demo data for the interceptor drone project, not every empty project
-  if (!state.maps.length && _currentProjectId === 'demo_proj_000') seedDemoData();
+  // seedDemoData is called inside _loadFromFirestore callback to avoid racing with async Firestore load
   if (!state.activeMapId && state.maps.length) state.activeMapId = state.maps[0].id;
   setupEvents();
   renderSidebar();
