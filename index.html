@@ -722,8 +722,10 @@ function fitToScreen() {
   const contentW = maxX - minX + pad * 2;
   const contentH = maxY - minY + pad * 2;
   state.zoom = clamp(Math.min(rect.width / contentW, rect.height / contentH), 0.15, 2);
-  state.panX = minX - pad;
-  state.panY = minY - pad;
+  const viewW = rect.width / state.zoom;
+  const viewH = rect.height / state.zoom;
+  state.panX = (minX - pad) - (viewW - contentW) / 2;
+  state.panY = (minY - pad) - (viewH - contentH) / 2;
   updateViewBox();
 }
 
