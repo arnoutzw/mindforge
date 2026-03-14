@@ -566,6 +566,8 @@ function _loadFromFirestore(projectId) {
       // Seed demo data only when Firestore confirms no data exists
       if (!state.maps.length && projectId === 'demo_proj_000') seedDemoData();
     }
+    // After Firestore data is loaded, honour any hash-based deep link
+    restoreFromHash();
     renderSidebar();
     renderCanvas();
   }).catch(err => {
@@ -930,6 +932,7 @@ function switchMap(id) {
   renderSidebar();
   renderCanvas();
   setTimeout(fitToScreen, 100);
+  history.replaceState(null, '', '#map/' + state.activeMapId);
 }
 function createMap(name, desc) {
   const map = { id: uid(), name, description: desc || '', nodes: [], connections: [], groups: [], createdAt: Date.now() };
@@ -938,6 +941,7 @@ function createMap(name, desc) {
   saveAll();
   renderSidebar();
   renderCanvas();
+  history.replaceState(null, '', '#map/' + state.activeMapId);
   return map;
 }
 function confirmDeleteMap(id, name) {
@@ -1469,6 +1473,9 @@ function setupEvents() {
     if (nodeG && e.button === 0) {
       const nodeId = nodeG.dataset.nodeId;
       state.selectedNodeId = nodeId;
+      if (state.activeMapId && state.selectedNodeId) {
+        history.replaceState(null, '', '#map/' + state.activeMapId + '/node/' + state.selectedNodeId);
+      }
       state.draggingNodeId = nodeId;
       const map = getMap();
       const node = map?.nodes.find(n => n.id === nodeId);
@@ -1491,7 +1498,7 @@ function setupEvents() {
       state.panStartPanX = state.panX;
       state.panStartPanY = state.panY;
       container.classList.add('panning');
-      if (e.button === 0 && !nodeG) { state.selectedNodeId = null; renderCanvas(); }
+      if (e.button === 0 && !nodeG) { state.selectedNodeId = null; if (state.activeMapId) history.replaceState(null, '', '#map/' + state.activeMapId); renderCanvas(); }
       e.preventDefault();
     }
   });
@@ -1558,6 +1565,9 @@ function setupEvents() {
     const nodeG = e.target.closest('.mind-node');
     if (nodeG) {
       state.selectedNodeId = nodeG.dataset.nodeId;
+      if (state.activeMapId && state.selectedNodeId) {
+        history.replaceState(null, '', '#map/' + state.activeMapId + '/node/' + state.selectedNodeId);
+      }
       renderCanvas();
       showContextMenu(e.clientX, e.clientY);
     }
@@ -1760,7 +1770,30 @@ function init() {
   renderCanvas();
   setTimeout(fitToScreen, 200);
 }
+
+// ==================== HASH-BASED DEEP LINKING ====================
+function restoreFromHash() {
+  const hash = window.location.hash.slice(1);
+  if (!hash) return;
+  const parts = hash.split('/');
+  if (parts[0] === 'map' && parts[1]) {
+    const mapExists = state.maps.some(m => m.id === parts[1]);
+    if (!mapExists) return;
+    state.activeMapId = parts[1];
+    if (parts[2] === 'node' && parts[3]) {
+      const map = getMap();
+      if (map && map.nodes.some(n => n.id === parts[3])) {
+        state.selectedNodeId = parts[3];
+      }
+    }
+    renderSidebar();
+    renderCanvas();
+  }
+}
+window.addEventListener('hashchange', restoreFromHash);
+
 init();
+restoreFromHash();
 </script>
 </body>
 </html>
