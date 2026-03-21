@@ -255,7 +255,13 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
   </div>
   <!-- Footer -->
   <div class="p-3 border-t border-zinc-800 flex gap-2">
-    <button onclick="exportMindforge()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Export .mindforge">Export</button>
+    <div class="flex-1 relative group">
+      <button class="w-full text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Export">Export ▾</button>
+      <div class="hidden group-hover:flex flex-col absolute bottom-full left-0 w-full bg-zinc-900 border border-zinc-700 rounded-lg overflow-hidden mb-1 z-50">
+        <button onclick="exportMindforge()" class="text-[10px] font-mono text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 px-3 py-1.5 text-left">.mindforge</button>
+        <button onclick="exportPng()" class="text-[10px] font-mono text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 px-3 py-1.5 text-left">.png</button>
+      </div>
+    </div>
     <button onclick="importMap()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Import .mindforge / .mmap">Import</button>
   </div>
 </aside>
@@ -1414,6 +1420,113 @@ async function exportMindforge() {
   a.download = (map.name || 'mindmap').replace(/[^a-z0-9 ]/gi, '_').trim() + '.mindforge';
   a.click();
   toast('Exported as .mindforge!', 'success');
+}
+
+function exportPng() {
+  const map = getMap();
+  if (!map || !map.nodes.length) return;
+
+  // Calculate bounding box of all nodes
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  map.nodes.forEach(n => {
+    const w = n.size?.w || DEFAULT_NODE_W;
+    const h = n.size?.h || DEFAULT_NODE_H;
+    minX = Math.min(minX, n.position.x);
+    minY = Math.min(minY, n.position.y);
+    maxX = Math.max(maxX, n.position.x + w);
+    maxY = Math.max(maxY, n.position.y + h);
+  });
+  const pad = 60;
+  const svgW = maxX - minX + pad * 2;
+  const svgH = maxY - minY + pad * 2;
+  const ox = minX - pad;
+  const oy = minY - pad;
+
+  // Build a standalone SVG with white background and black text
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${svgW}" height="${svgH}" viewBox="${ox} ${oy} ${svgW} ${svgH}">`;
+
+  // Defs: arrow markers (all black for print)
+  svg += `<defs>`;
+  svg += `<marker id="ea" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="6" orient="auto-start-reverse"><polygon points="0 0,10 3,0 6" fill="#333"/></marker>`;
+  svg += `</defs>`;
+
+  // White background
+  svg += `<rect x="${ox}" y="${oy}" width="${svgW}" height="${svgH}" fill="white"/>`;
+
+  // Render connections as black/dark lines
+  (map.connections || []).forEach(c => {
+    const fromNode = map.nodes.find(n => n.id === c.fromNodeId);
+    const toNode = map.nodes.find(n => n.id === c.toNodeId);
+    if (!fromNode || !toNode) return;
+    const pts = bestConnectors(fromNode, toNode);
+    const dx = pts.to.x - pts.from.x, dy = pts.to.y - pts.from.y;
+    const cx1 = pts.from.x + dx * 0.4, cy1 = pts.from.y;
+    const cx2 = pts.to.x - dx * 0.4, cy2 = pts.to.y;
+    svg += `<path d="M${pts.from.x},${pts.from.y} C${cx1},${cy1} ${cx2},${cy2} ${pts.to.x},${pts.to.y}" fill="none" stroke="#333" stroke-width="1.5" marker-end="url(#ea)"/>`;
+    const mx = (pts.from.x + pts.to.x) / 2, my = (pts.from.y + pts.to.y) / 2 - 8;
+    svg += `<text x="${mx}" y="${my}" text-anchor="middle" font-size="9" font-family="monospace" fill="#666">${escHtml(c.type)}</text>`;
+  });
+
+  // Render nodes with white fill and black text
+  (map.nodes || []).forEach(n => {
+    const w = n.size?.w || DEFAULT_NODE_W;
+    const h = n.size?.h || DEFAULT_NODE_H;
+    const color = getNodeColor(n);
+    const typeInfo = NODE_TYPES[n.type] || NODE_TYPES.Generic;
+    const x = n.position.x, y = n.position.y;
+
+    // White card with colored left bar
+    svg += `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="8" fill="white" stroke="#ccc" stroke-width="1"/>`;
+    svg += `<rect x="${x}" y="${y}" width="4" height="${h}" rx="2" fill="${color}"/>`;
+
+    // Type label
+    svg += `<text x="${x + 14}" y="${y + 16}" font-size="10" font-family="monospace" fill="${color}">${escHtml(typeInfo.label)}</text>`;
+
+    // Title — word wrap
+    const maxChars = Math.floor((w - 24) / 6.5);
+    const title = n.title || '';
+    const words = title.split(' ');
+    let lines = [];
+    let line = '';
+    words.forEach(word => {
+      if ((line + ' ' + word).trim().length > maxChars && line) {
+        lines.push(line.trim());
+        line = word;
+      } else {
+        line = (line + ' ' + word).trim();
+      }
+    });
+    if (line) lines.push(line.trim());
+    lines = lines.slice(0, 3); // max 3 lines
+    lines.forEach((l, i) => {
+      svg += `<text x="${x + 14}" y="${y + 30 + i * 14}" font-size="12" font-family="system-ui, sans-serif" fill="#111">${escHtml(l)}</text>`;
+    });
+  });
+
+  svg += '</svg>';
+
+  // Render SVG to canvas then export as PNG
+  const img = new Image();
+  const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  img.onload = () => {
+    const scale = 2; // 2x for crisp output
+    const canvas = document.createElement('canvas');
+    canvas.width = svgW * scale;
+    canvas.height = svgH * scale;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    canvas.toBlob(pngBlob => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(pngBlob);
+      a.download = (map.name || 'mindmap').replace(/[^a-z0-9 ]/gi, '_').trim() + '.png';
+      a.click();
+      toast('Exported as PNG!', 'success');
+    }, 'image/png');
+  };
+  img.src = url;
 }
 
 function importMap() { document.getElementById('import-input').click(); }
