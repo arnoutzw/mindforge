@@ -8,6 +8,7 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/lucide@latest"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -254,8 +255,14 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
   </div>
   <!-- Footer -->
   <div class="p-3 border-t border-zinc-800 flex gap-2">
-    <button onclick="exportMap()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Export JSON">Export</button>
-    <button onclick="importMap()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Import JSON">Import</button>
+    <div class="flex-1 relative group">
+      <button class="w-full text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Export">Export ▾</button>
+      <div class="hidden group-hover:flex flex-col absolute bottom-full left-0 w-full bg-zinc-900 border border-zinc-700 rounded-lg overflow-hidden mb-1 z-50">
+        <button onclick="exportMindforge()" class="text-[10px] font-mono text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 px-3 py-1.5 text-left">.mindforge</button>
+        <button onclick="exportMmap()" class="text-[10px] font-mono text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 px-3 py-1.5 text-left">.mmap</button>
+      </div>
+    </div>
+    <button onclick="importMap()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Import .mindforge / .mmap">Import</button>
   </div>
 </aside>
 
@@ -281,6 +288,7 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
         <button onclick="applyLayout('tree')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="tree" title="Tree Layout">Tree</button>
         <button onclick="applyLayout('radial')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="radial" title="Radial Layout">Radial</button>
         <button onclick="applyLayout('force')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="force" title="Force-Directed">Force</button>
+        <button onclick="applyLayout('fishbone')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="fishbone" title="Fishbone / Ishikawa">Fish</button>
       </div>
       <!-- Zoom -->
       <div class="flex items-center gap-2">
@@ -385,7 +393,7 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
 <div id="toast-container"></div>
 
 <!-- Hidden file input for import -->
-<input type="file" id="import-input" accept=".json" style="display:none" onchange="handleImport(event)">
+<input type="file" id="import-input" accept=".mindforge,.mmap,.json" style="display:none" onchange="handleImport(event)">
 
 <!-- ══════════════════════════════════════════════
      JAVASCRIPT
@@ -398,6 +406,9 @@ const NODE_TYPES = {
   FailureMode: { color: '#ef4444', icon: 'alert-triangle', label: 'Failure Mode' },
   Component:   { color: '#22c55e', icon: 'box',            label: 'Component' },
   TestCase:    { color: '#8b5cf6', icon: 'check-circle',   label: 'Test Case' },
+  Problem:     { color: '#ec4899', icon: 'target',         label: 'Problem' },
+  Cause:       { color: '#f97316', icon: 'git-branch',     label: 'Cause' },
+  Effect:      { color: '#06b6d4', icon: 'activity',       label: 'Effect' },
   Generic:     { color: '#71717a', icon: 'circle',         label: 'Generic' }
 };
 const CONN_TYPES = ['decomposes into', 'causes', 'verified by', 'mitigates'];
@@ -1035,6 +1046,7 @@ function applyLayout(type) {
   if (type === 'tree') layoutTree(map, rootId, positions);
   else if (type === 'radial') layoutRadial(map, rootId, positions);
   else if (type === 'force') layoutForce(map, positions);
+  else if (type === 'fishbone') layoutFishbone(map, rootId, positions);
 
   // Animate
   animateLayout(map, positions);
@@ -1145,6 +1157,75 @@ function layoutForce(map, positions) {
       positions[n.id].y += vel[n.id].y;
     });
   }
+}
+
+function layoutFishbone(map, rootId, positions) {
+  // Build parent → children adjacency
+  const children = {};
+  map.nodes.forEach(n => children[n.id] = []);
+  map.connections.forEach(c => {
+    if (children[c.fromNodeId]) children[c.fromNodeId].push(c.toNodeId);
+  });
+
+  // Find the Problem node (head of the fish)
+  const problemNode = map.nodes.find(n => n.type === 'Problem');
+  const problemId = problemNode ? problemNode.id : rootId;
+  const structRoot = rootId !== problemId ? rootId : null;
+
+  // Bones = all siblings of the Problem (children of structural root, minus Problem)
+  const rootKids = (structRoot ? children[structRoot] : children[rootId]) || [];
+  const bones = rootKids.filter(id => id !== problemId);
+
+  const visited = new Set();
+  if (structRoot) visited.add(structRoot);
+  visited.add(problemId);
+
+  // Layout: Problem (head) on the LEFT, spine extends RIGHT from Problem
+  const spineY = 0;
+  const boneGap = 300;
+
+  positions[problemId] = { x: 0, y: spineY };
+  // Place structural root label above the Problem
+  if (structRoot) positions[structRoot] = { x: 0, y: spineY - 100 };
+
+  bones.forEach((boneId, i) => {
+    visited.add(boneId);
+    const above = i % 2 === 0;
+    const dir = above ? -1 : 1;
+
+    // Bone attachment on spine, spread to the right
+    const spineX = (Math.floor(i / 2) + 1) * boneGap;
+    // Bone tip is diagonal from the spine
+    const boneX = spineX + 80;
+    const boneY = spineY + dir * 180;
+    positions[boneId] = { x: boneX, y: boneY };
+
+    // Sub-causes branch off this bone, extending further out diagonally
+    const subs = (children[boneId] || []).filter(id => !visited.has(id));
+    subs.forEach((subId, j) => {
+      visited.add(subId);
+      positions[subId] = {
+        x: boneX + (j + 1) * 60,
+        y: boneY + dir * (j + 1) * 90
+      };
+
+      // Tertiary
+      const tertiaries = (children[subId] || []).filter(id => !visited.has(id));
+      tertiaries.forEach((tId, k) => {
+        visited.add(tId);
+        positions[tId] = {
+          x: boneX + (j + 1) * 60 + (k + 1) * 50,
+          y: boneY + dir * ((j + 1) * 90 + (k + 1) * 70)
+        };
+      });
+    });
+  });
+
+  // Any orphans
+  const remaining = map.nodes.filter(n => !visited.has(n.id));
+  remaining.forEach((n, i) => {
+    positions[n.id] = { x: (bones.length / 2 + 1) * boneGap + (i + 1) * 250, y: spineY };
+  });
 }
 
 function animateLayout(map, targetPositions) {
@@ -1280,36 +1361,568 @@ function toggleSidebar() {
 }
 
 // ==================== EXPORT / IMPORT ====================
-function exportMap() {
+
+// .mindforge format: ZIP containing map.json + assets/ folder for binary data
+async function exportMindforge() {
   const map = getMap();
   if (!map) return;
-  const blob = new Blob([JSON.stringify(map, null, 2)], { type: 'application/json' });
+
+  const zip = new JSZip();
+
+  // Separate binary assets from node data
+  const assets = {};
+  const mapCopy = JSON.parse(JSON.stringify(map));
+
+  // Extract inline binary data (data URIs in node images/attachments) into assets/
+  mapCopy.nodes.forEach(n => {
+    // Node image
+    if (n.image && n.image.startsWith('data:')) {
+      const match = n.image.match(/^data:([^;]+);base64,(.+)$/);
+      if (match) {
+        const ext = match[1].split('/')[1] || 'bin';
+        const assetName = n.id + '_image.' + ext;
+        assets[assetName] = match[2]; // base64 content
+        n.image = 'assets/' + assetName; // replace with relative path
+      }
+    }
+    // Node attachments array
+    if (Array.isArray(n.attachments)) {
+      n.attachments = n.attachments.map((att, i) => {
+        if (att.data && att.data.startsWith('data:')) {
+          const match = att.data.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            const ext = match[1].split('/')[1] || 'bin';
+            const assetName = n.id + '_att' + i + '.' + ext;
+            assets[assetName] = match[2];
+            return { ...att, data: 'assets/' + assetName };
+          }
+        }
+        return att;
+      });
+    }
+  });
+
+  // Write map.json
+  zip.file('map.json', JSON.stringify(mapCopy, null, 2));
+
+  // Write manifest with format version
+  zip.file('manifest.json', JSON.stringify({
+    format: 'mindforge',
+    version: '1.0',
+    created: new Date().toISOString(),
+    generator: 'MindForge',
+    assetCount: Object.keys(assets).length
+  }, null, 2));
+
+  // Write binary assets
+  const assetsFolder = zip.folder('assets');
+  for (const [name, base64Data] of Object.entries(assets)) {
+    assetsFolder.file(name, base64Data, { base64: true });
+  }
+
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (map.name || 'mindmap').replace(/[^a-z0-9]/gi, '_') + '.json';
+  a.download = (map.name || 'mindmap').replace(/[^a-z0-9 ]/gi, '_').trim() + '.mindforge';
   a.click();
-  toast('Map exported!', 'success');
+  toast('Exported as .mindforge!', 'success');
 }
+async function exportMmap() {
+  const map = getMap();
+  if (!map) return;
+
+  // Build MindManager XML from the current map
+  const nodeById = {};
+  map.nodes.forEach(n => { nodeById[n.id] = n; });
+
+  // Build parent→children adjacency from connections
+  // For "causes" connections: A causes B means B is parent, A is child (effect contains causes)
+  // For "decomposes into": A decomposes into B means A is parent, B is child
+  const children = {};
+  const hasParent = new Set();
+  map.nodes.forEach(n => { children[n.id] = []; });
+  map.connections.forEach(c => {
+    if (c.type === 'causes') {
+      // A causes B → B is parent of A
+      if (children[c.toNodeId]) {
+        children[c.toNodeId].push(c.fromNodeId);
+        hasParent.add(c.fromNodeId);
+      }
+    } else {
+      // A decomposes into B → A is parent of B
+      if (children[c.fromNodeId]) {
+        children[c.fromNodeId].push(c.toNodeId);
+        hasParent.add(c.toNodeId);
+      }
+    }
+  });
+  // Root nodes = nodes without a parent
+  const roots = map.nodes.filter(n => !hasParent.has(n.id));
+
+  // Map MindForge types to MindManager task priority markers
+  function typeToPrio(type) {
+    if (type === 'Requirement') return 'urn:mindjet:Prio1';
+    if (type === 'FailureMode') return 'urn:mindjet:Prio3';
+    if (type === 'TestCase') return 'urn:mindjet:Prio2';
+    return '';
+  }
+
+  // Generate unique OIds
+  let oidCounter = 0;
+  function nextOid() { return '{00000000-0000-0000-0000-' + String(++oidCounter).padStart(12, '0') + '}'; }
+  const forgeIdToOid = {};
+  map.nodes.forEach(n => { forgeIdToOid[n.id] = nextOid(); });
+
+  // Escape XML text
+  function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+  // Build XML for a topic recursively
+  function topicXml(nodeId, depth) {
+    const n = nodeById[nodeId];
+    if (!n) return '';
+    const oid = forgeIdToOid[nodeId];
+    const prio = typeToPrio(n.type);
+    const taskXml = prio ? `<ap:Task TaskPriority="${esc(prio)}" />` : '';
+    const notesXml = n.description ? `<ap:NotesGroup><ap:Notes><ap:PlainTextContent>${esc(n.description)}</ap:PlainTextContent></ap:Notes></ap:NotesGroup>` : '';
+
+    const kids = children[nodeId] || [];
+    let subTopicsXml = '';
+    if (kids.length > 0) {
+      const isRoot = depth === 0;
+      // MindManager uses FloatingTopics for depth-0 children, SubTopics otherwise
+      const tag = isRoot ? 'ap:FloatingTopics' : 'ap:SubTopics';
+      subTopicsXml = `<${tag}>${kids.map(cid => topicXml(cid, depth + 1)).join('')}</${tag}>`;
+    }
+
+    return `<ap:Topic OId="${esc(oid)}">
+      <ap:Text PlainText="${esc(n.title)}" />
+      ${taskXml}${notesXml}${subTopicsXml}
+    </ap:Topic>`;
+  }
+
+  // Build Relationships XML for cross-links (connections that aren't parent→child)
+  const parentChildPairs = new Set();
+  map.connections.forEach(c => {
+    if (children[c.fromNodeId]?.includes(c.toNodeId)) {
+      parentChildPairs.add(c.fromNodeId + '|' + c.toNodeId);
+    }
+  });
+  const crossLinks = map.connections.filter(c => !parentChildPairs.has(c.fromNodeId + '|' + c.toNodeId));
+  let relationshipsXml = '';
+  if (crossLinks.length > 0) {
+    relationshipsXml = '<ap:Relationships>' + crossLinks.map(c => {
+      const fromOid = forgeIdToOid[c.fromNodeId];
+      const toOid = forgeIdToOid[c.toNodeId];
+      if (!fromOid || !toOid) return '';
+      return `<ap:Relationship>
+        <ap:ConnectionGroup Index="0"><ap:Connection><ap:ObjectReference OIdRef="${esc(fromOid)}" /></ap:Connection></ap:ConnectionGroup>
+        <ap:ConnectionGroup Index="1"><ap:Connection><ap:ObjectReference OIdRef="${esc(toOid)}" /></ap:Connection></ap:ConnectionGroup>
+      </ap:Relationship>`;
+    }).join('') + '</ap:Relationships>';
+  }
+
+  // Pick the main root (or create a virtual one if multiple roots)
+  const rootXml = roots.length === 1
+    ? topicXml(roots[0].id, 0)
+    : `<ap:Topic OId="${nextOid()}"><ap:Text PlainText="${esc(map.name || 'Mind Map')}" />
+        <ap:FloatingTopics>${roots.map(r => topicXml(r.id, 1)).join('')}</ap:FloatingTopics>
+       </ap:Topic>`;
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
+<ap:Map xmlns:ap="http://schemas.mindjet.com/MindManager/Application/2003" Version="2.1">
+  <ap:OneTopic>
+    ${rootXml}
+  </ap:OneTopic>
+  ${relationshipsXml}
+</ap:Map>`;
+
+  // Package into a ZIP as .mmap
+  const zip = new JSZip();
+  zip.file('Document.xml', documentXml);
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (map.name || 'mindmap').replace(/[^a-z0-9 ]/gi, '_').trim() + '.mmap';
+  a.click();
+  toast('Exported as .mmap!', 'success');
+}
+
 function importMap() { document.getElementById('import-input').click(); }
 function handleImport(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const map = JSON.parse(reader.result);
-      if (!map.nodes) throw new Error('Invalid map');
-      map.id = uid();
-      state.maps.push(map);
-      state.activeMapId = map.id;
-      saveAll();
-      renderSidebar();
-      renderCanvas();
-      toast('Map imported!', 'success');
-    } catch(err) { toast('Invalid map file', 'error'); }
-  };
-  reader.readAsText(file);
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.mmap')) {
+    handleMmapImport(file);
+  } else if (name.endsWith('.mindforge')) {
+    handleMindforgeImport(file);
+  } else {
+    // Legacy plain JSON import
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const map = JSON.parse(reader.result);
+        if (!map.nodes) throw new Error('Invalid map');
+        map.id = uid();
+        state.maps.push(map);
+        state.activeMapId = map.id;
+        saveAll();
+        renderSidebar();
+        renderCanvas();
+        toast('Map imported!', 'success');
+      } catch(err) { toast('Invalid map file', 'error'); }
+    };
+    reader.readAsText(file);
+  }
   e.target.value = '';
+}
+
+// .mindforge import: ZIP with map.json + assets/
+async function handleMindforgeImport(file) {
+  try {
+    const zip = await JSZip.loadAsync(file);
+
+    // Read map.json
+    const mapEntry = zip.file('map.json');
+    if (!mapEntry) { toast('No map.json found in .mindforge file', 'error'); return; }
+    const mapJson = await mapEntry.async('string');
+    const map = JSON.parse(mapJson);
+    if (!map.nodes) throw new Error('Invalid map data');
+
+    // Restore binary assets: convert assets/ references back to data URIs
+    const assetsFolder = zip.folder('assets');
+    const assetFiles = {};
+    if (assetsFolder) {
+      const entries = [];
+      assetsFolder.forEach((path, entry) => { if (!entry.dir) entries.push({ path, entry }); });
+      for (const { path, entry } of entries) {
+        const data = await entry.async('base64');
+        // Guess MIME type from extension
+        const ext = path.split('.').pop().toLowerCase();
+        const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf', bin: 'application/octet-stream' };
+        const mime = mimeMap[ext] || 'application/octet-stream';
+        assetFiles['assets/' + path] = 'data:' + mime + ';base64,' + data;
+      }
+    }
+
+    // Resolve asset references in nodes
+    map.nodes.forEach(n => {
+      if (n.image && assetFiles[n.image]) {
+        n.image = assetFiles[n.image];
+      }
+      if (Array.isArray(n.attachments)) {
+        n.attachments = n.attachments.map(att => {
+          if (att.data && assetFiles[att.data]) {
+            return { ...att, data: assetFiles[att.data] };
+          }
+          return att;
+        });
+      }
+    });
+
+    map.id = uid();
+    state.maps.push(map);
+    state.activeMapId = map.id;
+    saveAll();
+    renderSidebar();
+    renderCanvas();
+
+    const assetCount = Object.keys(assetFiles).length;
+    toast(`Imported ${map.nodes.length} nodes` + (assetCount ? ` + ${assetCount} assets` : '') + '!', 'success');
+  } catch (err) {
+    console.error('Mindforge import error:', err);
+    toast('Failed to read .mindforge file: ' + err.message, 'error');
+  }
+}
+
+// ==================== MMAP IMPORT ====================
+async function handleMmapImport(file) {
+  try {
+    const zip = await JSZip.loadAsync(file);
+    const docEntry = zip.file('Document.xml') || zip.file('document.xml');
+    if (!docEntry) { toast('No Document.xml found in .mmap', 'error'); return; }
+    const xmlText = await docEntry.async('string');
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlText, 'application/xml');
+    if (doc.querySelector('parsererror')) { toast('Invalid XML in .mmap', 'error'); return; }
+
+    const nodes = [];
+    const connections = [];
+    const nodeIdMap = new Map(); // MindManager OId → MindForge id
+
+    // Namespace-safe helpers — MindManager XML uses ap: prefix
+    function childrenByLocal(el, name) {
+      const out = [];
+      for (const c of el.children) { if (c.localName === name) out.push(c); }
+      return out;
+    }
+    function firstChildByLocal(el, name) {
+      for (const c of el.children) { if (c.localName === name) return c; }
+      return null;
+    }
+    function descendantsByLocal(el, name) {
+      const out = [];
+      for (const c of el.getElementsByTagName('*')) { if (c.localName === name) out.push(c); }
+      return out;
+    }
+
+    // Guess node type from MindManager task priority markers or topic text
+    function guessNodeType(topicEl, title) {
+      const lower = (title || '').toLowerCase();
+      // Check task priority marker (urn:mindjet:Prio1 etc.)
+      const task = firstChildByLocal(topicEl, 'Task');
+      if (task) {
+        const tp = task.getAttribute('TaskPriority') || '';
+        if (tp.includes('Prio1')) return 'Requirement';
+      }
+      // Check icon markers for clues
+      const markers = descendantsByLocal(topicEl, 'IconMarker');
+      for (const m of markers) {
+        const sig = (m.getAttribute('IconSignature') || m.getAttribute('StockIconSignature') || '').toLowerCase();
+        if (sig.includes('priority') || sig.includes('flag')) return 'Requirement';
+        if (sig.includes('risk') || sig.includes('warning') || sig.includes('thunder')) return 'FailureMode';
+        if (sig.includes('tick') || sig.includes('check') || sig.includes('yes')) return 'TestCase';
+      }
+      // Heuristic from title keywords
+      if (/\breq[.-]?\d|shall\b|must\b|requirement/i.test(lower)) return 'Requirement';
+      if (/\bfail|fmea|risk|hazard|fault|cause|root cause/i.test(lower)) return 'FailureMode';
+      if (/\btest|tc[.-]?\d|verify|validation/i.test(lower)) return 'TestCase';
+      if (/\bfunction|capability|perform/i.test(lower)) return 'Function';
+      if (/\bcomponent|module|subsystem|assembly|hardware|software/i.test(lower)) return 'Component';
+      return 'Generic';
+    }
+
+    // Extract text from a topic element
+    function getTopicText(topicEl) {
+      const textEl = firstChildByLocal(topicEl, 'Text');
+      if (textEl) {
+        const plain = textEl.getAttribute('PlainText');
+        if (plain) return plain.replace(/&#10;/g, '\n').trim();
+        return textEl.textContent.trim();
+      }
+      return 'Untitled';
+    }
+
+    // Extract notes from a topic
+    function getTopicNotes(topicEl) {
+      const ng = firstChildByLocal(topicEl, 'NotesGroup') || firstChildByLocal(topicEl, 'Notes');
+      if (ng) return ng.textContent.trim().replace(/<[^>]+>/g, '').substring(0, 500);
+      return '';
+    }
+
+    // Extract priority from task info (urn:mindjet:Prio1 format)
+    function getTopicPriority(topicEl) {
+      const task = firstChildByLocal(topicEl, 'Task');
+      if (task) {
+        const p = task.getAttribute('TaskPriority') || task.getAttribute('Priority') || '';
+        if (p.includes('Prio1') || p === '1') return 'Critical';
+        if (p.includes('Prio2') || p === '2') return 'High';
+        if (p.includes('Prio3') || p === '3') return 'Medium';
+        if (p.includes('Prio4') || p === '4') return 'Low';
+        if (p.includes('Prio5') || p === '5') return 'Low';
+        return 'Medium';
+      }
+      return 'Medium';
+    }
+
+    // Check if a topic has any child Topic elements
+    function hasChildTopics(topicEl) {
+      for (const child of topicEl.children) {
+        if (child.localName === 'SubTopics' || child.localName === 'FloatingTopics') {
+          for (const sub of child.children) { if (sub.localName === 'Topic') return true; }
+        }
+      }
+      return false;
+    }
+
+    // Detect fishbone / cause-effect diagrams from XML content or filename
+    const allText = xmlText.toLowerCase();
+    const isFishbone = /fishbone|ishikawa|cause.and.effect/.test(file.name.toLowerCase())
+      || /fishbone|ishikawa/.test(allText.substring(0, 5000));
+    const defaultConnType = isFishbone ? 'causes' : 'decomposes into';
+
+    // Recursively walk topics and build nodes + parent→child connections
+    let nodeCounter = 0;
+    const mapLabel = file.name.replace(/\.mmap$/i, '').replace(/[_-]+/g, ' ');
+    function walkTopic(topicEl, depth, siblingIndex, parentForgeId) {
+      let title = getTopicText(topicEl);
+      const isUntitled = title === 'Untitled';
+      // Skip empty leaf topics (template placeholders with no text and no children)
+      if (isUntitled && !hasChildTopics(topicEl) && !getTopicNotes(topicEl)) return siblingIndex;
+      // Use map filename as title for untitled root
+      if (isUntitled && depth === 0) title = mapLabel;
+
+      const forgeId = uid() + '_' + (nodeCounter++);
+      const mmOid = topicEl.getAttribute('OId') || topicEl.getAttribute('Oid') || forgeId;
+      nodeIdMap.set(mmOid, forgeId);
+
+      // Position: tree layout — spread by depth (Y) and sibling index (X)
+      const x = 100 + siblingIndex * 260;
+      const y = 60 + depth * 160;
+
+      const node = {
+        id: forgeId,
+        title: title,
+        type: isFishbone ? '_fishbone' : guessNodeType(topicEl, title),
+        position: { x, y },
+        size: { w: DEFAULT_NODE_W, h: DEFAULT_NODE_H },
+        priority: getTopicPriority(topicEl),
+        status: 'Active',
+        owner: '',
+        description: getTopicNotes(topicEl),
+        linkedApp: null,
+        linkedId: null,
+        color: null
+      };
+      nodes.push(node);
+
+      // Connection from parent
+      if (parentForgeId) {
+        connections.push({
+          id: uid() + '_c' + connections.length,
+          fromNodeId: parentForgeId,
+          toNodeId: forgeId,
+          type: defaultConnType
+        });
+      }
+
+      // Walk child SubTopics and FloatingTopics
+      let childIndex = 0;
+      for (const child of topicEl.children) {
+        if (child.localName === 'SubTopics' || child.localName === 'FloatingTopics') {
+          for (const sub of child.children) {
+            if (sub.localName === 'Topic') {
+              const nextIdx = walkTopic(sub, depth + 1, childIndex, forgeId);
+              childIndex = (nextIdx !== undefined ? nextIdx : childIndex) + 1;
+            }
+          }
+        }
+      }
+      return siblingIndex;
+    }
+
+    // Find the root topic(s) — OneTopic > Topic is the standard root
+    let rootTopics = [];
+    // Namespace-safe: find OneTopic by localName anywhere in the doc
+    const allOneTopic = descendantsByLocal(doc.documentElement, 'OneTopic');
+    if (allOneTopic.length > 0) {
+      for (const ot of allOneTopic) {
+        for (const child of ot.children) {
+          if (child.localName === 'Topic') rootTopics.push(child);
+        }
+      }
+    }
+    // Fallback: any Topic element
+    if (rootTopics.length === 0) {
+      const all = descendantsByLocal(doc.documentElement, 'Topic');
+      if (all.length > 0) rootTopics.push(all[0]);
+    }
+
+    if (rootTopics.length === 0) { toast('No topics found in .mmap', 'error'); return; }
+
+    // Walk all root topics
+    let globalSiblingIdx = 0;
+    for (const root of rootTopics) {
+      walkTopic(root, 0, globalSiblingIdx++, null);
+    }
+
+    // Parse Relationship elements (cross-links between topics)
+    // Structure: <Relationship> → <ConnectionGroup Index="0"> → <Connection> → <ObjectReference OIdRef="..."/>
+    const relContainer = descendantsByLocal(doc.documentElement, 'Relationships');
+    for (const rc of relContainer) {
+      const rels = childrenByLocal(rc, 'Relationship');
+      for (const rel of rels) {
+        const connGroups = childrenByLocal(rel, 'ConnectionGroup');
+        if (connGroups.length < 2) continue;
+        // Each ConnectionGroup has a Connection child with an ObjectReference child
+        const getOIdRef = (cg) => {
+          const conn = firstChildByLocal(cg, 'Connection');
+          if (!conn) return null;
+          const objRef = firstChildByLocal(conn, 'ObjectReference');
+          if (objRef) return objRef.getAttribute('OIdRef');
+          // Fallback: attribute on Connection itself
+          return conn.getAttribute('ObjectOIdRef') || conn.getAttribute('ObjectOidRef');
+        };
+        const fromOid = getOIdRef(connGroups[0]);
+        const toOid = getOIdRef(connGroups[1]);
+        const fromId = fromOid ? nodeIdMap.get(fromOid) : null;
+        const toId = toOid ? nodeIdMap.get(toOid) : null;
+        if (fromId && toId) {
+          connections.push({
+            id: uid() + '_r' + connections.length,
+            fromNodeId: fromId,
+            toNodeId: toId,
+            type: defaultConnType
+          });
+        }
+      }
+    }
+
+    // Fishbone post-processing: assign Problem / Cause / Effect based on graph
+    if (isFishbone) {
+      const rootForgeId = nodes.length > 0 ? nodes[0].id : null;
+      // Count connections excluding parent-child from structural root
+      const outgoing = {};
+      const incoming = {};
+      nodes.forEach(n => { outgoing[n.id] = 0; incoming[n.id] = 0; });
+      connections.forEach(c => {
+        // Skip parent-child connections from the structural root
+        if (c.fromNodeId === rootForgeId && c.id.includes('_c')) return;
+        if (outgoing[c.fromNodeId] !== undefined) outgoing[c.fromNodeId]++;
+        if (incoming[c.toNodeId] !== undefined) incoming[c.toNodeId]++;
+      });
+      // Problem = find by problem-statement keywords, then fall back to most connections
+      let problemId = null;
+      const problemPatterns = /\b(drop|decline|decrease|fail|poor|problem|issue|defect|loss|low quality|error|crash|delay|miss|broke|degrad)\w*/i;
+      const problemNode = nodes.find(n => n.id !== rootForgeId && problemPatterns.test(n.title));
+      if (problemNode) {
+        problemId = problemNode.id;
+      } else {
+        // Fallback: node with most total relationship connections
+        let maxConns = -1;
+        nodes.forEach(n => {
+          if (n.id === rootForgeId) return;
+          const total = incoming[n.id] + outgoing[n.id];
+          if (total > maxConns) { maxConns = total; problemId = n.id; }
+        });
+      }
+      nodes.forEach(n => {
+        if (n.id === rootForgeId) {
+          n.type = 'Generic';
+        } else if (n.id === problemId) {
+          n.type = 'Problem';
+        } else if (outgoing[n.id] > 0) {
+          n.type = 'Effect';
+        } else {
+          n.type = 'Cause';
+        }
+      });
+    }
+
+    // Build the map name from the file name
+    const mapName = file.name.replace(/\.mmap$/i, '').replace(/[_-]+/g, ' ');
+
+    const map = {
+      id: uid(),
+      name: mapName,
+      description: 'Imported from MindManager .mmap file',
+      nodes: nodes,
+      connections: connections
+    };
+
+    state.maps.push(map);
+    state.activeMapId = map.id;
+    saveAll();
+    renderSidebar();
+    renderCanvas();
+    toast(`Imported ${nodes.length} topics from .mmap!`, 'success');
+
+    // Auto-layout for a cleaner result
+    setTimeout(() => applyLayout(isFishbone ? 'fishbone' : 'tree'), 200);
+  } catch (err) {
+    console.error('MMAP import error:', err);
+    toast('Failed to read .mmap file: ' + err.message, 'error');
+  }
 }
 
 // ==================== DEMO SEED DATA ====================
