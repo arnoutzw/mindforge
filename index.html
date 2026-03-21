@@ -713,6 +713,75 @@ function setZoom(z, anchorX, anchorY) {
 }
 function zoomIn() { setZoom(state.zoom * 1.2); }
 function zoomOut() { setZoom(state.zoom / 1.2); }
+
+// ==================== OVERLAP RESOLUTION ====================
+function resolveOverlaps(draggedId) {
+  const map = getMap();
+  if (!map || map.nodes.length < 2) return;
+  const gap = 12; // minimum gap between nodes
+  const dragged = map.nodes.find(n => n.id === draggedId);
+  if (!dragged) return;
+  const dw = dragged.size?.w || DEFAULT_NODE_W;
+  const dh = dragged.size?.h || DEFAULT_NODE_H;
+
+  // Check which nodes the dragged node overlaps
+  const overlapping = [];
+  map.nodes.forEach(n => {
+    if (n.id === draggedId) return;
+    const nw = n.size?.w || DEFAULT_NODE_W;
+    const nh = n.size?.h || DEFAULT_NODE_H;
+    const overlapX = (dragged.position.x < n.position.x + nw + gap) && (dragged.position.x + dw + gap > n.position.x);
+    const overlapY = (dragged.position.y < n.position.y + nh + gap) && (dragged.position.y + dh + gap > n.position.y);
+    if (overlapX && overlapY) overlapping.push(n);
+  });
+
+  if (!overlapping.length) return;
+
+  // Calculate push vectors for each overlapping node
+  const dcx = dragged.position.x + dw / 2;
+  const dcy = dragged.position.y + dh / 2;
+  const targets = overlapping.map(n => {
+    const nw = n.size?.w || DEFAULT_NODE_W;
+    const nh = n.size?.h || DEFAULT_NODE_H;
+    const ncx = n.position.x + nw / 2;
+    const ncy = n.position.y + nh / 2;
+    let dx = ncx - dcx;
+    let dy = ncy - dcy;
+    // If centers are on top of each other, push right-down
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) { dx = 1; dy = 0.5; }
+    // Determine minimum push distance to clear overlap
+    const overlapAmountX = (dw + nw) / 2 + gap - Math.abs(dx);
+    const overlapAmountY = (dh + nh) / 2 + gap - Math.abs(dy);
+    // Push along the axis with the smallest overlap (easier escape)
+    let tx, ty;
+    if (overlapAmountX < overlapAmountY) {
+      tx = n.position.x + (dx > 0 ? overlapAmountX : -overlapAmountX);
+      ty = n.position.y;
+    } else {
+      tx = n.position.x;
+      ty = n.position.y + (dy > 0 ? overlapAmountY : -overlapAmountY);
+    }
+    return { node: n, fromX: n.position.x, fromY: n.position.y, toX: tx, toY: ty };
+  });
+
+  // Animate the push over ~200ms
+  const duration = 200;
+  const start = performance.now();
+  function animate(now) {
+    const t = Math.min((now - start) / duration, 1);
+    // Ease-out cubic
+    const ease = 1 - Math.pow(1 - t, 3);
+    targets.forEach(({ node, fromX, fromY, toX, toY }) => {
+      node.position.x = fromX + (toX - fromX) * ease;
+      node.position.y = fromY + (toY - fromY) * ease;
+    });
+    renderCanvas();
+    if (t < 1) requestAnimationFrame(animate);
+    else saveAll(); // save final positions
+  }
+  requestAnimationFrame(animate);
+}
+
 function fitToScreen() {
   const map = getMap();
   if (!map || !map.nodes.length) return;
@@ -2128,7 +2197,9 @@ function setupEvents() {
   // Mouse up
   window.addEventListener('mouseup', e => {
     if (state.draggingNodeId) {
+      const draggedId = state.draggingNodeId;
       state.draggingNodeId = null;
+      resolveOverlaps(draggedId);
       saveAll();
     }
     if (state.isPanning) {
