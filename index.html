@@ -255,13 +255,7 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
   </div>
   <!-- Footer -->
   <div class="p-3 border-t border-zinc-800 flex gap-2">
-    <div class="flex-1 relative group">
-      <button class="w-full text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Export">Export ▾</button>
-      <div class="hidden group-hover:flex flex-col absolute bottom-full left-0 w-full bg-zinc-900 border border-zinc-700 rounded-lg overflow-hidden mb-1 z-50">
-        <button onclick="exportMindforge()" class="text-[10px] font-mono text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 px-3 py-1.5 text-left">.mindforge</button>
-        <button onclick="exportMmap()" class="text-[10px] font-mono text-zinc-400 hover:text-amber-400 hover:bg-zinc-800 px-3 py-1.5 text-left">.mmap</button>
-      </div>
-    </div>
+    <button onclick="exportMindforge()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Export .mindforge">Export</button>
     <button onclick="importMap()" class="flex-1 text-center text-[10px] font-mono text-zinc-500 hover:text-amber-400 smooth-transition py-1 rounded hover:bg-zinc-800" title="Import .mindforge / .mmap">Import</button>
   </div>
 </aside>
@@ -283,13 +277,7 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
     </div>
     <!-- Center: Layout + Zoom -->
     <div class="flex items-center gap-3">
-      <!-- Layout buttons -->
-      <div class="flex bg-zinc-800 rounded-lg p-0.5 border border-zinc-700">
-        <button onclick="applyLayout('tree')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="tree" title="Tree Layout">Tree</button>
-        <button onclick="applyLayout('radial')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="radial" title="Radial Layout">Radial</button>
-        <button onclick="applyLayout('force')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="force" title="Force-Directed">Force</button>
-        <button onclick="applyLayout('fishbone')" class="layout-btn px-2.5 py-1 rounded-md text-[11px] font-mono text-zinc-400 hover:text-amber-400 smooth-transition" data-layout="fishbone" title="Fishbone / Ishikawa">Fish</button>
-      </div>
+      <!-- Spacer where layout buttons were -->
       <!-- Zoom -->
       <div class="flex items-center gap-2">
         <button onclick="zoomOut()" class="text-zinc-400 hover:text-amber-400 smooth-transition"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="8" y1="11" x2="14" y2="11"/></svg></button>
@@ -393,7 +381,7 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
 <div id="toast-container"></div>
 
 <!-- Hidden file input for import -->
-<input type="file" id="import-input" accept=".mindforge,.mmap,.json" style="display:none" onchange="handleImport(event)">
+<input type="file" id="import-input" accept=".mindforge,.mmap" style="display:none" onchange="handleImport(event)">
 
 <!-- ══════════════════════════════════════════════
      JAVASCRIPT
@@ -1426,125 +1414,6 @@ async function exportMindforge() {
   a.download = (map.name || 'mindmap').replace(/[^a-z0-9 ]/gi, '_').trim() + '.mindforge';
   a.click();
   toast('Exported as .mindforge!', 'success');
-}
-async function exportMmap() {
-  const map = getMap();
-  if (!map) return;
-
-  // Build MindManager XML from the current map
-  const nodeById = {};
-  map.nodes.forEach(n => { nodeById[n.id] = n; });
-
-  // Build parent→children adjacency from connections
-  // For "causes" connections: A causes B means B is parent, A is child (effect contains causes)
-  // For "decomposes into": A decomposes into B means A is parent, B is child
-  const children = {};
-  const hasParent = new Set();
-  map.nodes.forEach(n => { children[n.id] = []; });
-  map.connections.forEach(c => {
-    if (c.type === 'causes') {
-      // A causes B → B is parent of A
-      if (children[c.toNodeId]) {
-        children[c.toNodeId].push(c.fromNodeId);
-        hasParent.add(c.fromNodeId);
-      }
-    } else {
-      // A decomposes into B → A is parent of B
-      if (children[c.fromNodeId]) {
-        children[c.fromNodeId].push(c.toNodeId);
-        hasParent.add(c.toNodeId);
-      }
-    }
-  });
-  // Root nodes = nodes without a parent
-  const roots = map.nodes.filter(n => !hasParent.has(n.id));
-
-  // Map MindForge types to MindManager task priority markers
-  function typeToPrio(type) {
-    if (type === 'Requirement') return 'urn:mindjet:Prio1';
-    if (type === 'FailureMode') return 'urn:mindjet:Prio3';
-    if (type === 'TestCase') return 'urn:mindjet:Prio2';
-    return '';
-  }
-
-  // Generate unique OIds
-  let oidCounter = 0;
-  function nextOid() { return '{00000000-0000-0000-0000-' + String(++oidCounter).padStart(12, '0') + '}'; }
-  const forgeIdToOid = {};
-  map.nodes.forEach(n => { forgeIdToOid[n.id] = nextOid(); });
-
-  // Escape XML text
-  function esc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
-
-  // Build XML for a topic recursively
-  function topicXml(nodeId, depth) {
-    const n = nodeById[nodeId];
-    if (!n) return '';
-    const oid = forgeIdToOid[nodeId];
-    const prio = typeToPrio(n.type);
-    const taskXml = prio ? `<ap:Task TaskPriority="${esc(prio)}" />` : '';
-    const notesXml = n.description ? `<ap:NotesGroup><ap:Notes><ap:PlainTextContent>${esc(n.description)}</ap:PlainTextContent></ap:Notes></ap:NotesGroup>` : '';
-
-    const kids = children[nodeId] || [];
-    let subTopicsXml = '';
-    if (kids.length > 0) {
-      const isRoot = depth === 0;
-      // MindManager uses FloatingTopics for depth-0 children, SubTopics otherwise
-      const tag = isRoot ? 'ap:FloatingTopics' : 'ap:SubTopics';
-      subTopicsXml = `<${tag}>${kids.map(cid => topicXml(cid, depth + 1)).join('')}</${tag}>`;
-    }
-
-    return `<ap:Topic OId="${esc(oid)}">
-      <ap:Text PlainText="${esc(n.title)}" />
-      ${taskXml}${notesXml}${subTopicsXml}
-    </ap:Topic>`;
-  }
-
-  // Build Relationships XML for cross-links (connections that aren't parent→child)
-  const parentChildPairs = new Set();
-  map.connections.forEach(c => {
-    if (children[c.fromNodeId]?.includes(c.toNodeId)) {
-      parentChildPairs.add(c.fromNodeId + '|' + c.toNodeId);
-    }
-  });
-  const crossLinks = map.connections.filter(c => !parentChildPairs.has(c.fromNodeId + '|' + c.toNodeId));
-  let relationshipsXml = '';
-  if (crossLinks.length > 0) {
-    relationshipsXml = '<ap:Relationships>' + crossLinks.map(c => {
-      const fromOid = forgeIdToOid[c.fromNodeId];
-      const toOid = forgeIdToOid[c.toNodeId];
-      if (!fromOid || !toOid) return '';
-      return `<ap:Relationship>
-        <ap:ConnectionGroup Index="0"><ap:Connection><ap:ObjectReference OIdRef="${esc(fromOid)}" /></ap:Connection></ap:ConnectionGroup>
-        <ap:ConnectionGroup Index="1"><ap:Connection><ap:ObjectReference OIdRef="${esc(toOid)}" /></ap:Connection></ap:ConnectionGroup>
-      </ap:Relationship>`;
-    }).join('') + '</ap:Relationships>';
-  }
-
-  // Pick the main root (or create a virtual one if multiple roots)
-  const rootXml = roots.length === 1
-    ? topicXml(roots[0].id, 0)
-    : `<ap:Topic OId="${nextOid()}"><ap:Text PlainText="${esc(map.name || 'Mind Map')}" />
-        <ap:FloatingTopics>${roots.map(r => topicXml(r.id, 1)).join('')}</ap:FloatingTopics>
-       </ap:Topic>`;
-
-  const documentXml = `<?xml version="1.0" encoding="UTF-8"?>
-<ap:Map xmlns:ap="http://schemas.mindjet.com/MindManager/Application/2003" Version="2.1">
-  <ap:OneTopic>
-    ${rootXml}
-  </ap:OneTopic>
-  ${relationshipsXml}
-</ap:Map>`;
-
-  // Package into a ZIP as .mmap
-  const zip = new JSZip();
-  zip.file('Document.xml', documentXml);
-  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = (map.name || 'mindmap').replace(/[^a-z0-9 ]/gi, '_').trim() + '.mmap';
-  a.click();
-  toast('Exported as .mmap!', 'success');
 }
 
 function importMap() { document.getElementById('import-input').click(); }
