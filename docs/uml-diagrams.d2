@@ -1,0 +1,398 @@
+# MindForge — UML Diagrams (D2)
+# Visual engineering mind-mapping PWA with SVG canvas, Firebase sync, and node-connection graph
+
+# ════════════════════════════════════════════
+# CLASSES
+# ════════════════════════════════════════════
+class-diagram: {
+  State: State {
+    shape: class
+    maps: "MindMap[]"
+    activeMapId: string
+    theme: string
+    zoom: number
+    panX: number
+    panY: number
+    selectedNodeId: string
+    draggingNodeId: string
+    isPanning: boolean
+    connectingFrom: string
+    connectingMouse: object
+    spaceDown: boolean
+    sidebarOpen: boolean
+  }
+
+  MindMap: MindMap {
+    shape: class
+    id: string
+    name: string
+    nodes: "MindNode[]"
+    connections: "Connection[]"
+    groups: "Group[]"
+    createdAt: number
+  }
+
+  MindNode: MindNode {
+    shape: class
+    id: string
+    type: string
+    field_label: string
+    description: string
+    x: number
+    y: number
+    w: number
+    h: number
+    priority: string
+    status: string
+    color: string
+    meta: object
+  }
+
+  Connection: Connection {
+    shape: class
+    id: string
+    from: string
+    to: string
+    type: string
+    field_label: string
+  }
+
+  Group: Group {
+    shape: class
+    id: string
+    name: string
+    nodeIds: "string[]"
+    color: string
+  }
+
+  NodeTypes: NodeTypes (Constants) {
+    shape: class
+    Function: "{color:#3b82f6, icon:'zap'}"
+    Requirement: "{color:#f59e0b, icon:'file-text'}"
+    FailureMode: "{color:#ef4444, icon:'alert-triangle'}"
+    Component: "{color:#22c55e, icon:'box'}"
+    TestCase: "{color:#8b5cf6, icon:'check-circle'}"
+    Problem: "{color:#ec4899, icon:'target'}"
+    Cause: "{color:#f97316, icon:'git-branch'}"
+    Effect: "{color:#06b6d4, icon:'activity'}"
+    Generic: "{color:#71717a, icon:'circle'}"
+  }
+
+  ConnectionTypes: ConnectionTypes (Constants) {
+    shape: class
+    CONN_TYPES: "['decomposes into','causes','verified by','mitigates']"
+    CONN_ARROWS: "arrow marker per type"
+    CONN_COLORS: "color per type"
+  }
+
+  FirebaseState: FirebaseState {
+    shape: class
+    +_firebaseInitialized: boolean
+    +_firestoreDb: Firestore
+    +_currentUser: object
+    +_firestoreUnsub: Function
+    +_firestoreSaveTimer: number
+    +_lastFirestoreUpdate: number
+    +_firestoreLoaded: boolean
+    +_editingNodeId: string
+    +_pendingRemoteSync: object
+    +_savePaused: boolean
+    +_currentProjectId: string
+  }
+
+  # Relationships
+  State -> MindMap: "contains many"
+  MindMap -> MindNode: "contains many"
+  MindMap -> Connection: "contains many"
+  MindMap -> Group: "contains many"
+  MindNode -> NodeTypes: "typed by"
+  Connection -> ConnectionTypes: "typed by"
+  Group -> MindNode: "groups many"
+}
+
+# ════════════════════════════════════════════
+# SEQUENCE: Main — Create Node and Connect
+# ════════════════════════════════════════════
+seq-main: Create Node and Connect {
+  shape: sequence_diagram
+
+  user: User
+  header: Header Toolbar
+  canvas: SVG Canvas
+  state: State
+  modal: Node Edit Modal
+  renderer: Canvas Renderer
+  persist: Persistence
+  firestore: Firestore
+
+  user -> header: "Click '+ Node' button"
+  header -> state: "addNodeAtCenter()"
+  state -> state: "Calculate center from viewport: panX/panY + container size / 2"
+  state -> state: "Create node = {id: uid(), type:'Generic', label:'New Node', x, y, w:200, h:72}"
+  state -> state: "getMap().nodes.push(node)"
+  state -> state: "selectedNodeId = node.id"
+  state -> modal: "showEditModal(node.id)"
+  modal -> user: "Display modal with: Label, Description, Type selector, Priority, Status"
+  user -> modal: "Fill in Label='Power Supply', Type='Component', Priority='High'"
+  user -> modal: "Click 'Save'"
+  modal -> state: "Update node properties in map"
+  modal -> persist: "saveAll()"
+  persist -> persist: "localStorage.setItem(prefix+'maps', JSON.stringify(state.maps))"
+  persist -> firestore: "Debounced 500ms: collection('projects').doc(pid).collection('mindforge').doc('state').set(data)"
+  modal -> renderer: "renderCanvas()"
+  renderer -> renderer: "Clear and rebuild SVG layers"
+  renderer -> renderer: "For each group: draw group-box rect with label"
+  renderer -> renderer: "For each connection: draw bezier path with arrow marker"
+  renderer -> renderer: "For each node: draw foreignObject with colored header + content"
+  renderer -> renderer: "Add connector circles (hidden until hover)"
+  renderer -> renderer: "Render minimap with scaled-down view"
+  renderer -> canvas: "Update DOM — groups-layer, connections-layer, nodes-layer"
+  user -> canvas: "Hover over node connector circle (right side)"
+  canvas -> state: "connectingFrom = node.id"
+  canvas -> canvas: "Set cursor to crosshair"
+  user -> canvas: "Mouse move — drag connection line"
+  canvas -> renderer: "Draw temporary drag-connection path in drag-connection-layer"
+  user -> canvas: "Mouse up over target node"
+  canvas -> state: "Detect target node under pointer"
+  state -> modal: "showConnectionModal(fromId, toId)"
+  modal -> user: "Show connection type selector: decomposes into, causes, verified by, mitigates"
+  user -> modal: "Select 'decomposes into'"
+  modal -> state: "getMap().connections.push({id, from, to, type:'decomposes into'})"
+  modal -> persist: "saveAll()"
+  modal -> renderer: "renderCanvas()"
+  renderer -> renderer: "Draw new bezier path from source to target with appropriate arrow marker and color"
+}
+
+# ════════════════════════════════════════════
+# SEQUENCE: Firebase Sync and Conflict Resolution
+# ════════════════════════════════════════════
+seq-secondary: Firebase Sync and Project Switching {
+  shape: sequence_diagram
+
+  portal: Parent Portal
+  listener: postMessage Listener
+  state: State
+  firebase: Firebase SDK
+  firestore: Firestore
+  renderer: Canvas Renderer
+  localstorage: localStorage
+
+  portal -> listener: "postMessage({type:'admin-auth', sso, firebaseConfig, isAdmin})"
+  listener -> firebase: "_initFirebase(config) — firebase.initializeApp()"
+  firebase -> state: "_firestoreDb = firebase.firestore()"
+  listener -> state: "Set _currentUser from SSO data"
+  listener -> firebase: "signInWithCredential(idToken)"
+  firebase -> listener: "Auth success"
+
+  portal -> listener: "postMessage({type:'active-project', projectId:'demo_proj_000'})"
+  listener -> state: "Save current project data: _saveToProjectImmediate(oldPid, maps, activeMapId)"
+  state -> firestore: "Immediate Firestore write for old project"
+  listener -> state: "_currentProjectId = newPid"
+  listener -> state: "loadAll()"
+  state -> localstorage: "localStorage.getItem(prefix+'maps') — instant load"
+  state -> firestore: "_loadFromFirestore(projectId)"
+  firestore -> firestore: "docRef = projects/{pid}/mindforge/state"
+  firestore -> firestore: "docRef.get() — initial load"
+  firestore -> state: "state.maps = data.maps"
+  firestore -> state: "state.activeMapId = data.activeMapId"
+  firestore -> localstorage: "Write Firestore data back to localStorage as cache"
+  state -> renderer: "restoreFromHash() — apply URL hash deep link"
+  state -> renderer: "renderSidebar()"
+  state -> renderer: "renderCanvas()"
+
+  firestore -> firestore: "docRef.onSnapshot() — real-time listener"
+  firestore -> state: "Remote change detected (remoteUpdatedAt > _lastFirestoreUpdate)"
+  state -> state: "Check if _editingNodeId is set (modal open)"
+  state -> state: "If editing: stash in _pendingRemoteSync, defer"
+  state -> state: "If not editing: apply remote state.maps immediately"
+  state -> renderer: "renderSidebar() + renderCanvas()"
+  state -> localstorage: "Persist to localStorage as backup"
+}
+
+# ════════════════════════════════════════════
+# SEQUENCE: Pan, Zoom, and Drag Interactions
+# ════════════════════════════════════════════
+seq-interaction: Canvas Pan, Zoom, and Node Drag {
+  shape: sequence_diagram
+
+  user: User
+  canvas: SVG Canvas
+  state: State
+  renderer: Renderer
+  minimap: Minimap
+
+  user -> canvas: "Hold Space + Mouse down (or middle-click)"
+  canvas -> state: "isPanning = true, panStartX/Y = mouse position"
+  user -> canvas: "Mouse move while panning"
+  canvas -> state: "panX += (mouseX - panStartX), panY += (mouseY - panStartY)"
+  canvas -> renderer: "Apply CSS transform: translate(panX, panY) scale(zoom)"
+  canvas -> minimap: "Update minimap viewport rectangle position"
+  user -> canvas: "Mouse up"
+  canvas -> state: "isPanning = false"
+
+  user -> canvas: "Mouse wheel (scroll)"
+  canvas -> state: "Calculate new zoom = clamp(zoom * (1 + delta*0.001), 0.2, 3.0)"
+  canvas -> state: "Adjust panX/panY to zoom towards cursor position"
+  canvas -> renderer: "Apply CSS transform with new zoom"
+  canvas -> minimap: "Rescale minimap nodes and viewport"
+  canvas -> renderer: "Update zoom-slider value and zoom-label text"
+
+  user -> canvas: "Mouse down on a node"
+  canvas -> state: "draggingNodeId = node.id"
+  canvas -> state: "Record dragStartX/Y, nodeDragStartX/Y"
+  user -> canvas: "Mouse move while dragging"
+  canvas -> state: "node.x = nodeDragStartX + (mouseX - dragStartX) / zoom"
+  canvas -> state: "node.y = nodeDragStartY + (mouseY - dragStartY) / zoom"
+  canvas -> renderer: "Update node foreignObject transform"
+  canvas -> renderer: "Recalculate bezier paths for connected connections"
+  canvas -> minimap: "Update minimap node position"
+  user -> canvas: "Mouse up — end drag"
+  canvas -> state: "draggingNodeId = null"
+  canvas -> state: "saveAll() — persist new position"
+}
+
+# ════════════════════════════════════════════
+# ARCHITECTURE
+# ════════════════════════════════════════════
+architecture: {
+  browser: Browser {
+    shape: cloud
+    style.stroke: "#f59e0b"
+
+    mindforge: MindForge App {
+      ui-layer: UI Layer {
+        sidebar: Sidebar {
+          map-list: Map List
+          import-export: Import / Export Buttons
+        }
+        header: Header {
+          map-name: Map Name Display
+          zoom-controls: Zoom Slider + Fit
+          add-node-btn: "+ Node" Button
+          theme-toggle: Theme Toggle
+          user-info: User Info (SSO)
+        }
+        canvas-area: Canvas Area {
+          svg-canvas: SVG Canvas {
+            grid-layer: Grid Pattern Layer
+            groups-layer: Groups Layer
+            connections-layer: Connections Layer (bezier paths)
+            nodes-layer: Nodes Layer (foreignObject)
+            drag-conn-layer: Drag Connection Layer
+          }
+          minimap: Minimap (scaled SVG)
+        }
+        context-menu: Context Menu {
+          edit: Edit Node
+          change-type: Change Type Submenu
+          push-to-app: Push to App Submenu
+          delete: Delete Node
+        }
+        modal: Modal (Edit Node / New Map)
+      }
+
+      state-layer: State Layer {
+        state-obj: State Object (maps, zoom, pan, selection)
+        node-types: Node Types Constants
+        conn-types: Connection Types Constants
+      }
+
+      persistence: Persistence Layer {
+        localstorage: localStorage (instant backup)
+        firestore-sync: Firestore Sync (debounced)
+      }
+
+      theme-bridge: BSI Theme Bridge
+    }
+  }
+
+  firebase-cloud: Firebase Cloud {
+    shape: cloud
+    style.stroke: "#ef4444"
+    auth: Firebase Auth (SSO)
+    firestore: Firestore {
+      shape: cylinder
+      projects-col: "projects/{pid}/mindforge/state"
+    }
+  }
+
+  cdn: CDN Libraries {
+    shape: cloud
+    style.stroke: "#3b82f6"
+    tailwind: Tailwind CSS
+    lucide: Lucide Icons
+    jszip: JSZip
+    firebase-compat: Firebase Compat SDK
+  }
+
+  portal: BSI Portal {
+    shape: hexagon
+    sso: SSO Auth
+    project-context: Active Project Context
+    theme: Theme Controller
+  }
+
+  cross-app: Other BSI Apps {
+    shape: hexagon
+    scrum: Scrum App
+    reqforge: ReqForge
+    alm: ALM App
+  }
+
+  browser -> cdn: "loads libraries from CDN"
+  browser -> firebase-cloud: "real-time sync (onSnapshot)"
+  portal -> browser: "postMessage (admin-auth, active-project, theme-change)"
+  browser -> cross-app: "pushToApp — postMessage to sibling iframes"
+}
+
+# ════════════════════════════════════════════
+# STATES
+# ════════════════════════════════════════════
+states: {
+  loading: Loading {
+    style.stroke: "#3b82f6"
+  }
+  demo-mode: Demo Mode (localStorage only) {
+    style.stroke: "#fbbf24"
+  }
+  synced: Synced (Firebase active) {
+    style.stroke: "#22c55e"
+  }
+  idle: Idle (viewing canvas) {
+    style.stroke: "#71717a"
+  }
+  panning: Panning Canvas {
+    style.stroke: "#06b6d4"
+  }
+  dragging-node: Dragging Node {
+    style.stroke: "#f59e0b"
+  }
+  connecting: Drawing Connection {
+    style.stroke: "#8b5cf6"
+  }
+  editing-modal: Editing Node (Modal open) {
+    style.stroke: "#ec4899"
+  }
+  context-menu-open: Context Menu Open {
+    style.stroke: "#ef4444"
+  }
+
+  loading -> demo-mode: "No Firebase / ?demo=true"
+  loading -> synced: "Firebase authenticated + project"
+  demo-mode -> synced: "SSO postMessage received"
+  synced -> demo-mode: "Sign out / Firebase error"
+  synced -> idle: "Canvas rendered"
+  demo-mode -> idle: "Canvas rendered"
+  idle -> panning: "Space+mouseDown / middle-click"
+  panning -> idle: "Mouse up"
+  idle -> dragging-node: "Mouse down on node"
+  dragging-node -> idle: "Mouse up"
+  idle -> connecting: "Mouse down on connector circle"
+  connecting -> editing-modal: "Drop on target node — show connection modal"
+  connecting -> idle: "Drop on empty space — cancel"
+  idle -> editing-modal: "Double-click node / context menu 'Edit'"
+  editing-modal -> idle: "Save / Cancel modal"
+  idle -> context-menu-open: "Right-click on node"
+  context-menu-open -> idle: "Click outside / select action"
+  context-menu-open -> editing-modal: "Select 'Edit' from menu"
+}
