@@ -190,7 +190,7 @@ body { font-family: 'Inter', sans-serif; overflow: hidden; }
       if (e.data && e.data.type === 'theme-change') applyBsiTheme(mapTheme(e.data.theme));
     });
     applyBsiTheme('dark');
-    try { window.parent.postMessage({ type: 'theme-request' }, '*'); } catch(e) {}
+    try { window.parent.postMessage({ type: 'theme-request' }, window.location.ancestorOrigins?.[0] || '*'); } catch(e) {}
   } else {
     var saved = localStorage.getItem(APP_THEME_KEY) || 'dark';
     if (saved === 'asml') { saved = 'light'; localStorage.setItem(APP_THEME_KEY, saved); }
@@ -2284,7 +2284,14 @@ function renderDragConnection() {
 }
 
 // ==================== SSO & PROJECT LISTENERS ====================
+const ALLOWED_ORIGINS = ['https://blacksphereindustries.nl', 'https://www.blacksphereindustries.nl'];
+if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+  ALLOWED_ORIGINS.push('http://localhost:8080');
+}
+function isAllowedOrigin(origin) { return ALLOWED_ORIGINS.includes(origin) || origin.endsWith('.pages.dev'); }
+
 window.addEventListener('message', e => {
+  if (!isAllowedOrigin(e.origin)) return;
   const data = e.data;
   if (!data || typeof data !== 'object') return;
 
@@ -2463,14 +2470,16 @@ restoreFromHash();
 
     // ── Portal Deep Link Bridge ──
     if (window.parent !== window) {
+      const _parentOrigin = window.location.ancestorOrigins?.[0] || '*';
       const _notifyParentHash = () => {
         const h = window.location.hash ? window.location.hash.substring(1) : '';
-        try { window.parent.postMessage({ type: 'hash-change', hash: h }, '*'); } catch(e) {}
+        try { window.parent.postMessage({ type: 'hash-change', hash: h }, _parentOrigin); } catch(e) {}
       };
       window.addEventListener('hashchange', _notifyParentHash);
       const _origReplace = history.replaceState.bind(history);
       history.replaceState = function() { _origReplace.apply(history, arguments); _notifyParentHash(); };
       window.addEventListener('message', function(e) {
+        if (!isAllowedOrigin(e.origin)) return;
         if (e.data && e.data.type === 'set-hash' && typeof e.data.hash === 'string') {
           if (window.location.hash !== '#' + e.data.hash) window.location.hash = e.data.hash;
         }
