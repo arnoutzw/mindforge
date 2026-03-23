@@ -1,0 +1,518 @@
+%% ============================================================
+%% MindForge — UML Diagrams (Mermaid)
+%% ============================================================
+
+%% === CLASS DIAGRAM ===
+classDiagram
+    class State {
+        +Array~MindMap~ maps
+        +string activeMapId
+        +string theme
+        +number zoom
+        +number panX
+        +number panY
+        +string selectedNodeId
+        +string draggingNodeId
+        +number dragStartX
+        +number dragStartY
+        +number nodeDragStartX
+        +number nodeDragStartY
+        +boolean isPanning
+        +number panStartX
+        +number panStartY
+        +string connectingFrom
+        +object connectingMouse
+        +boolean spaceDown
+        +boolean sidebarOpen
+    }
+
+    class MindMap {
+        +string id
+        +string name
+        +Array~Node~ nodes
+        +Array~Connection~ connections
+        +Array~Group~ groups
+    }
+
+    class Node {
+        +string id
+        +string title
+        +string type
+        +string color
+        +object position
+        +object size
+        +string owner
+        +string priority
+        +string status
+        +string description
+        +string linkedApp
+        +string linkedId
+    }
+
+    class Connection {
+        +string id
+        +string fromNodeId
+        +string toNodeId
+        +string type
+    }
+
+    class Group {
+        +string id
+        +string title
+        +string color
+        +Array~string~ nodeIds
+    }
+
+    class NodeTypes {
+        <<enumeration>>
+        Function
+        Requirement
+        FailureMode
+        Component
+        TestCase
+        Problem
+        Cause
+        Effect
+        Generic
+    }
+
+    class ConnTypes {
+        <<enumeration>>
+        decomposes_into
+        causes
+        verified_by
+        mitigates
+    }
+
+    class PersistenceService {
+        -string DB_PREFIX_BASE
+        -string _currentProjectId
+        -object _firestoreDb
+        -object _currentUser
+        -Function _firestoreUnsub
+        -Timer _firestoreSaveTimer
+        -number _lastFirestoreUpdate
+        -boolean _firestoreLoaded
+        -boolean _savePaused
+        +saveAll()
+        +loadAll()
+        +getDbPrefix()
+        +_loadFromFirestore(projectId)
+        +_saveToProjectImmediate(pid, maps, activeMapId)
+        +_migrateToProject()
+        +_cleanupWrongSeeds()
+    }
+
+    class CanvasRenderer {
+        +renderCanvas()
+        +renderNodeSVG(node)
+        +renderConnectionSVG(conn, map)
+        +renderGroupSVG(group, map)
+        +renderMinimap()
+        +updateViewBox()
+    }
+
+    class InteractionManager {
+        +screenToCanvas(sx, sy)
+        +canvasToScreen(cx, cy)
+        +setZoom(z, anchorX, anchorY)
+        +zoomIn()
+        +zoomOut()
+        +fitToScreen()
+        +resolveOverlaps(draggedId)
+        +bestConnectors(from, to)
+        +getConnectorPos(node, pos)
+    }
+
+    class NodeEditor {
+        +addNodeAtCenter()
+        +editSelectedNode()
+        +deleteSelectedNode()
+        +changeNodeType(type)
+        +pushToApp(appName)
+        +showEditModal(node)
+    }
+
+    class SidebarManager {
+        +renderSidebar()
+        +switchMap(id)
+        +showNewMapModal()
+        +confirmDeleteMap(id, name)
+        +toggleSidebar()
+    }
+
+    class ImportExport {
+        +exportMindforge()
+        +exportPng()
+        +importMap()
+        +handleImport(event)
+    }
+
+    class ThemeBridge {
+        +applyBsiTheme(theme)
+        +toggleTheme()
+        +updateThemeIcon(theme)
+    }
+
+    State --> "*" MindMap : contains
+    MindMap --> "*" Node : contains
+    MindMap --> "*" Connection : connects
+    MindMap --> "*" Group : groups
+    Node --> NodeTypes : type
+    Connection --> ConnTypes : type
+    PersistenceService --> State : persists
+    CanvasRenderer --> State : renders
+    InteractionManager --> State : modifies
+    NodeEditor --> State : modifies
+    SidebarManager --> State : manages maps
+
+%% === SEQUENCE DIAGRAM: Page Load & Initialization ===
+sequenceDiagram
+    participant User
+    participant Browser
+    participant ThemeBridge
+    participant App
+    participant SSO
+    participant Persistence
+    participant Firestore
+    participant LocalStorage
+    participant Canvas
+    participant Sidebar
+
+    User->>Browser: Load index.html
+    activate Browser
+    Browser->>ThemeBridge: Execute BSI Theme Bridge IIFE
+    ThemeBridge->>ThemeBridge: Detect embedded/standalone
+    alt isEmbedded
+        ThemeBridge->>ThemeBridge: applyBsiTheme('dark')
+        ThemeBridge-->>Browser: postMessage('theme-request')
+    else standalone
+        ThemeBridge->>LocalStorage: getItem(APP_THEME_KEY)
+        LocalStorage-->>ThemeBridge: saved theme
+        ThemeBridge->>ThemeBridge: applyBsiTheme(theme)
+    end
+
+    Browser->>App: Script executes
+    activate App
+    App->>App: Parse URL params (demo=true check)
+    App->>App: Initialize state object
+    App->>App: Define NODE_TYPES, CONN_TYPES constants
+
+    App->>SSO: Register postMessage listener
+    activate SSO
+    SSO->>Browser: Listen for 'admin-auth' messages
+    SSO->>Browser: Listen for 'active-project' messages
+    SSO->>Browser: Listen for 'projects-registry' messages
+    SSO->>Browser: Listen for 'seed-demo-data' messages
+    SSO->>Browser: Listen for 'wipe-demo-data' messages
+    deactivate SSO
+
+    App->>Persistence: _migrateToProject()
+    App->>Persistence: _cleanupWrongSeeds()
+    App->>Persistence: loadAll()
+    activate Persistence
+    Persistence->>LocalStorage: getItem(prefix + 'maps')
+    LocalStorage-->>Persistence: JSON maps data
+    Persistence->>Persistence: Parse maps into state.maps
+    Persistence->>LocalStorage: getItem(prefix + 'active')
+    LocalStorage-->>Persistence: activeMapId
+
+    alt Firestore available
+        Persistence->>Firestore: docRef.get()
+        activate Firestore
+        Firestore-->>Persistence: Document snapshot
+        deactivate Firestore
+        alt document exists
+            Persistence->>Persistence: Override state with Firestore data
+            Persistence->>LocalStorage: Persist Firestore data locally
+        else no data and demo project
+            Persistence->>App: seedDemoData()
+        end
+        Persistence->>Persistence: restoreFromHash()
+        Persistence->>Firestore: docRef.onSnapshot() for real-time sync
+    else no Firestore
+        alt no maps and demo project
+            Persistence->>App: seedDemoData()
+        end
+    end
+    deactivate Persistence
+
+    App->>Sidebar: renderSidebar()
+    App->>Canvas: renderCanvas()
+    activate Canvas
+    Canvas->>Canvas: renderGroupSVG for each group
+    Canvas->>Canvas: renderConnectionSVG for each connection
+    Canvas->>Canvas: renderNodeSVG for each node
+    Canvas->>Canvas: updateViewBox()
+    Canvas->>Canvas: renderMinimap()
+    deactivate Canvas
+
+    App->>App: Register mouse/keyboard event handlers
+    App->>App: fitToScreen() if nodes exist
+    deactivate App
+    deactivate Browser
+
+%% === SEQUENCE DIAGRAM: Node Drag, Connect, and Edit ===
+sequenceDiagram
+    participant User
+    participant SVG
+    participant Interaction
+    participant State
+    participant Canvas
+    participant Persistence
+    participant Modal
+
+    Note over User, Modal: --- Drag a Node ---
+    User->>SVG: mousedown on .mind-node
+    SVG->>Interaction: Handle mousedown
+    activate Interaction
+    Interaction->>State: draggingNodeId = node.id
+    Interaction->>State: Record dragStartX/Y and nodeDragStartX/Y
+    Interaction->>State: selectedNodeId = node.id
+    deactivate Interaction
+
+    loop Mouse moves
+        User->>SVG: mousemove
+        SVG->>Interaction: Handle mousemove
+        activate Interaction
+        Interaction->>Interaction: screenToCanvas(e.clientX, e.clientY)
+        Interaction->>State: Update node.position.x/y
+        Interaction->>Canvas: renderCanvas()
+        deactivate Interaction
+    end
+
+    User->>SVG: mouseup
+    SVG->>Interaction: Handle mouseup
+    activate Interaction
+    Interaction->>State: draggingNodeId = null
+    Interaction->>Interaction: resolveOverlaps(draggedId)
+    activate Interaction
+    Interaction->>Interaction: Calculate overlapping nodes
+    loop For each overlapping node
+        Interaction->>Interaction: Calculate push vector
+    end
+    Interaction->>Interaction: Animate push over 200ms
+    loop Animation frames
+        Interaction->>State: Update pushed node positions
+        Interaction->>Canvas: renderCanvas()
+    end
+    Interaction->>Persistence: saveAll()
+    deactivate Interaction
+    deactivate Interaction
+
+    Note over User, Modal: --- Create Connection ---
+    User->>SVG: mousedown on .connector circle
+    SVG->>Interaction: Handle connector mousedown
+    activate Interaction
+    Interaction->>State: connectingFrom = {nodeId, pos}
+    deactivate Interaction
+
+    loop Mouse moves
+        User->>SVG: mousemove
+        SVG->>Interaction: Handle mousemove
+        Interaction->>State: connectingMouse = {x, y}
+        Interaction->>Canvas: Draw temporary connection line
+    end
+
+    User->>SVG: mouseup on target .connector
+    SVG->>Interaction: Handle connector mouseup
+    activate Interaction
+    Interaction->>State: Create new Connection object
+    Interaction->>State: Add to map.connections
+    Interaction->>State: connectingFrom = null
+    Interaction->>Canvas: renderCanvas()
+    Interaction->>Persistence: saveAll()
+    deactivate Interaction
+
+    Note over User, Modal: --- Edit Node ---
+    User->>SVG: Double-click on node
+    SVG->>Interaction: Handle dblclick
+    Interaction->>Modal: showEditModal(node)
+    activate Modal
+    Modal->>Modal: Build modal HTML with fields
+    Modal->>Modal: Set _editingNodeId = node.id
+    Modal-->>User: Display edit form
+    deactivate Modal
+
+    User->>Modal: Fill in title, type, priority, owner, description
+    User->>Modal: Click "Save"
+    activate Modal
+    Modal->>State: Update node properties
+    Modal->>State: _editingNodeId = null
+    opt _pendingRemoteSync exists
+        Modal->>State: Apply deferred remote sync
+        Modal->>State: _pendingRemoteSync = null
+    end
+    Modal->>Canvas: renderCanvas()
+    Modal->>Sidebar: renderSidebar()
+    Modal->>Persistence: saveAll()
+    Modal->>Modal: Remove modal DOM
+    deactivate Modal
+
+%% === SEQUENCE DIAGRAM: Real-time Firestore Sync ===
+sequenceDiagram
+    participant RemoteUser
+    participant Firestore
+    participant Listener
+    participant State
+    participant Canvas
+    participant Sidebar
+
+    RemoteUser->>Firestore: Update mindforge state document
+    Firestore->>Listener: onSnapshot fires
+    activate Listener
+    Listener->>Listener: Check snap.metadata.hasPendingWrites
+    alt hasPendingWrites (local echo)
+        Listener-->>Listener: return (ignore)
+    end
+    Listener->>Listener: Check _savePaused flag
+    alt _savePaused (our own save echo)
+        Listener-->>Listener: return (ignore)
+    end
+    Listener->>Listener: Compare remoteUpdatedAt vs _lastFirestoreUpdate
+    alt remote is newer
+        Listener->>Listener: Update _lastFirestoreUpdate
+        alt _editingNodeId is set (modal open)
+            Listener->>State: _pendingRemoteSync = snapshot data
+            Note right of Listener: Deferred until modal closes
+        else no edit in progress
+            Listener->>State: state.maps = snapshot.maps
+            Listener->>State: state.activeMapId = snapshot.activeMapId
+            Listener->>Sidebar: renderSidebar()
+            Listener->>Canvas: renderCanvas()
+        end
+    end
+    deactivate Listener
+
+%% === COMPONENT DIAGRAM ===
+graph TB
+    subgraph "MindForge Application"
+        subgraph "UI Layer"
+            SidebarUI["Sidebar<br/>(Map List + CRUD)"]
+            HeaderUI["Header Bar<br/>(Zoom, Fit, Add Node)"]
+            CanvasSVG["SVG Canvas<br/>(Nodes + Connections + Groups)"]
+            MinimapUI["Minimap<br/>(Overview SVG)"]
+            ContextMenu["Context Menu<br/>(Edit, Type, Delete)"]
+            EditModal["Edit Modal<br/>(Node Properties)"]
+            NewMapModal["New Map Modal"]
+            DemoBanner["Demo Banner"]
+        end
+
+        subgraph "Rendering Engine"
+            NodeRenderer["Node SVG Renderer<br/>(foreignObject + connectors)"]
+            ConnectionRenderer["Connection SVG Renderer<br/>(Bezier curves + labels)"]
+            GroupRenderer["Group SVG Renderer<br/>(Dashed rectangles)"]
+            MinimapRenderer["Minimap Renderer"]
+            ViewBoxManager["ViewBox Manager<br/>(pan + zoom transform)"]
+        end
+
+        subgraph "Interaction Layer"
+            DragHandler["Node Drag Handler"]
+            PanHandler["Canvas Pan Handler<br/>(Space+Drag / MMB)"]
+            ZoomHandler["Zoom Handler<br/>(Wheel + Slider)"]
+            ConnectHandler["Connection Drag Handler"]
+            OverlapResolver["Overlap Resolver<br/>(Animated push)"]
+            SelectionMgr["Selection Manager"]
+        end
+
+        subgraph "Data Layer"
+            StateStore["State Object<br/>(maps, zoom, pan, selection)"]
+            FirestorePersist["Firestore Persistence<br/>(projects/*/mindforge/state)"]
+            LocalStoragePersist["localStorage Persistence<br/>(prefixed keys)"]
+            SSOBridge["SSO Bridge<br/>(postMessage)"]
+            ProjectBridge["Project Bridge<br/>(active-project postMessage)"]
+        end
+
+        subgraph "External"
+            FirebaseSDK["Firebase SDK<br/>(Compat v9)"]
+            FirestoreDB["Cloud Firestore"]
+            BSIPortal["BSI Portal<br/>(iframe host)"]
+        end
+    end
+
+    SidebarUI --> StateStore
+    HeaderUI --> ZoomHandler
+    HeaderUI --> ViewBoxManager
+    CanvasSVG --> NodeRenderer
+    CanvasSVG --> ConnectionRenderer
+    CanvasSVG --> GroupRenderer
+    DragHandler --> StateStore
+    DragHandler --> OverlapResolver
+    ConnectHandler --> StateStore
+    PanHandler --> ViewBoxManager
+    ZoomHandler --> ViewBoxManager
+    NodeRenderer --> StateStore
+    ConnectionRenderer --> StateStore
+    EditModal --> StateStore
+    StateStore --> FirestorePersist
+    StateStore --> LocalStoragePersist
+    FirestorePersist --> FirebaseSDK
+    FirebaseSDK --> FirestoreDB
+    SSOBridge --> BSIPortal
+    ProjectBridge --> BSIPortal
+    MinimapUI --> MinimapRenderer
+
+%% === STATE DIAGRAM ===
+stateDiagram-v2
+    [*] --> Loading : Page load
+
+    Loading --> Initialized : Scripts loaded
+
+    state Initialized {
+        [*] --> LocalStorageLoad
+        LocalStorageLoad --> FirestoreLoad : Firestore available
+        LocalStorageLoad --> Ready : No Firestore
+        FirestoreLoad --> Ready : Data loaded
+    }
+
+    Ready --> MapActive : Map selected
+
+    state MapActive {
+        [*] --> Idle
+
+        state Idle {
+            [*] --> Viewing
+            Viewing --> NodeSelected : Click node
+            NodeSelected --> Viewing : Click empty space
+            NodeSelected --> Editing : Double-click / Edit menu
+        }
+
+        Idle --> Dragging : Mousedown on node
+        Dragging --> Idle : Mouseup
+        Dragging --> OverlapResolving : Drop causes overlap
+        OverlapResolving --> Idle : Animation complete
+
+        Idle --> Panning : Space+Drag or MMB
+        Panning --> Idle : Release
+
+        Idle --> Connecting : Mousedown on connector
+        Connecting --> Idle : Mouseup on target connector
+        Connecting --> Idle : Mouseup on empty (cancel)
+
+        Idle --> Editing : Open edit modal
+        Editing --> Idle : Save / Cancel modal
+    }
+
+    state SyncState {
+        [*] --> Disconnected
+        Disconnected --> Connected : Firebase init
+        Connected --> Listening : onSnapshot active
+        Listening --> Saving : Local change
+        Saving --> Listening : Save complete
+        Listening --> RemoteUpdate : Remote snapshot
+        RemoteUpdate --> Listening : State updated
+        RemoteUpdate --> DeferredSync : Modal open
+        DeferredSync --> Listening : Modal closed
+    }
+
+    state ZoomState {
+        [*] --> Normal
+        Normal --> ZoomedIn : Scroll up / Zoom+
+        Normal --> ZoomedOut : Scroll down / Zoom-
+        ZoomedIn --> Normal : Reset
+        ZoomedOut --> Normal : Reset
+        ZoomedIn --> FitToScreen : Fit button
+        ZoomedOut --> FitToScreen : Fit button
+        Normal --> FitToScreen : Fit button
+        FitToScreen --> Normal : Calculated zoom applied
+    }
