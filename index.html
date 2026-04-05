@@ -2379,7 +2379,7 @@ window.addEventListener('message', e => {
             // 2. Fallback: custom token via Cloud Function
             if (!firebaseAuthOk && sso.firebaseIdToken) {
               try {
-                const fn = firebase.functions().httpsCallable('mintCustomToken');
+                const fn = firebase.functions('europe-west1').httpsCallable('mintCustomToken');
                 const result = await _authTimeout(fn({ idToken: sso.firebaseIdToken }), 8000);
                 await _authTimeout(auth.signInWithCustomToken(result.data.customToken), 8000);
                 firebaseAuthOk = true;
